@@ -267,6 +267,7 @@ function Get-EffectiveDesktopConfig {
         RestoreWhenOnline = ConvertTo-Bool (Get-Prop $Config 'RestoreWhenOnline' $true) $true
         RestartExplorer = ConvertTo-Bool (Get-Prop $Config 'RestartExplorer' $true) $true
         NotifyUser = ConvertTo-Bool (Get-Prop $Config 'NotifyUser' $true) $true
+        Preview = ConvertTo-Bool (Get-Prop $Config 'Preview' $false) $false
         SyncShortcutsWhileOnline = ConvertTo-Bool (Get-Prop $Config 'SyncShortcutsWhileOnline' $true) $true
         SyncExtensions = $extensions.ToArray()
         UseWindowsConnectivity = ConvertTo-Bool (Get-Prop $internet 'UseWindowsConnectivity' $true) $true

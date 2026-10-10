@@ -336,6 +336,9 @@ Assert-Equal 'news url kept' $widgetCfg.NewsUrl 'https://intranet.example/news.j
 Assert-Equal 'poll floor' $widgetCfg.NewsPollMinutes 1
 Assert-Equal 'corner fallback' $widgetCfg.WidgetCorner 'BottomRight'
 Assert-Equal 'widget can be disabled' $widgetCfg.WidgetEnabled $false
+Assert-Equal 'preview off by default' $widgetCfg.Preview $false
+$previewCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{ Preview = $true; Enabled = $true })
+Assert-Equal 'preview can be enabled' $previewCfg.Preview $true
 Assert-Equal 'theme light by default' (Resolve-AppThemeLight $null) $true
 Assert-Equal 'theme light one' (Resolve-AppThemeLight 1) $true
 Assert-Equal 'theme dark zero' (Resolve-AppThemeLight 0) $false

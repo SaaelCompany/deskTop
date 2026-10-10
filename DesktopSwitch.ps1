@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.6'
+$script:Version = '1.2.7'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -658,7 +658,7 @@ function Invoke-MonitorCycle {
     $script:DesktopVerdict = [string]$verdict
     Write-Log ("internet={0} share={1} verdict={2} mode={3}->{4} action={5} fail={6} success={7} desktop={8}" -f $internet, $share, $verdict, $mode, $decision.Mode, $decision.Action, $decision.FailureStreak, $decision.SuccessStreak, $networkPath)
 
-    $preview = $WhatIf -or -not $script:Cfg.Enabled
+    $preview = $WhatIf -or $script:Cfg.Preview -or -not $script:Cfg.Enabled
     if (Test-ShouldSyncShortcuts -SyncEnabled $script:Cfg.SyncShortcutsWhileOnline -ShareStatus $share) {
         if ($preview) {
             Write-Log 'WhatIf: ярлыки были бы скопированы в локальную папку.'
