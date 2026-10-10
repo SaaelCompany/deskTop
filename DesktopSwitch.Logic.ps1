@@ -1127,3 +1127,31 @@ function Get-JiraIssueKey {
     }
     return ([string](Get-Prop $parsed 'issueKey' '')).Trim()
 }
+
+function Test-InstallerSystemAccount {
+    param([string]$IdentityName)
+    if ([string]::IsNullOrWhiteSpace($IdentityName)) { return $false }
+    return $IdentityName.Trim() -match '(?i)(^|\\)SYSTEM$'
+}
+
+function Resolve-InstallerStartupScope {
+    param([bool]$AllUsers, [bool]$SystemAccount)
+    if ($AllUsers -or $SystemAccount) { return 'AllUsers' }
+    return 'CurrentUser'
+}
+
+function Test-InstallerShouldLaunch {
+    param([bool]$SystemAccount, [bool]$NoLaunch)
+    if ($NoLaunch -or $SystemAccount) { return $false }
+    return $true
+}
+
+function Test-DesktopSwitchInstallDir {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    $full = $Path.Trim()
+    if ($full.StartsWith('\\') -or $full.StartsWith('//')) { return $false }
+    if ($full -match '^[A-Za-z]:\\?$') { return $false }
+    if ($full -eq '/' -or $full -eq '\') { return $false }
+    return $true
+}

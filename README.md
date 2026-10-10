@@ -81,6 +81,28 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-DesktopSwitch.
 
 Установщик кладёт `DesktopSwitch.vbs` в автозагрузку, останавливает старый монитор и запускает новый. Ключ `-ScheduledTask` дополнительно создаёт задачу на вход пользователя. Повторный запуск установщика применяет изменённый `config.json`.
 
+## Пакет SCCM
+
+Все настройки кладутся в пакет заранее. В источнике приложения рядом со скриптами должен лежать готовый `config.json`: `Enabled` равен `true`, адрес helpdesk, проекты, категории и лента новостей уже заполнены. `NetworkDesktopPath` оставьте пустым: путь общего стола у каждого пользователя свой и читается из политики. Отдельная настройка на компьютере после установки не нужна.
+
+Программа установки SCCM выполняется от SYSTEM:
+
+```text
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-DesktopSwitch.ps1 -InstallDir "%ProgramFiles%\DesktopSwitch" -AllUsers
+```
+
+`-InstallDir` копирует пакет в постоянную папку. Ярлык автозагрузки указывает на неё, а не на кэш SCCM. Учётная запись SYSTEM включает автозапуск для всех пользователей и не запускает монитор в своём сеансе: окно и переключение стола появляются при входе сотрудника. Повторная установка заменяет и файлы, и `config.json`.
+
+Обнаружение: существует `%ProgramFiles%\DesktopSwitch\DesktopSwitch.ps1`.
+
+Удаление:
+
+```text
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ProgramFiles%\DesktopSwitch\Uninstall-DesktopSwitch.ps1" -AllUsers -InstallDir "%ProgramFiles%\DesktopSwitch"
+```
+
+Папка программы удаляется. Журналы в `%LOCALAPPDATA%\DesktopSwitch` и локальные копии ярлыков остаются. Пользователям достаточно чтения папки установки: общий ключ helpdesk в `config.json` они менять не должны.
+
 Журнал каждого пользователя: `%LOCALAPPDATA%\DesktopSwitch\desktop-switch.log`. Двойной щелчок по `Show-DesktopSwitchStatus.cmd` показывает текущее состояние.
 
 ## Полезные параметры
@@ -138,7 +160,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-DesktopSwitch.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Uninstall-DesktopSwitch.ps1
 ```
 
-Для общей автозагрузки добавьте `-AllUsers`. Удаляются ярлык автозапуска и задача планировщика. `config.json`, журнал и локальные копии ярлыков остаются. Если в момент удаления был включён локальный стол, сетевой путь сам не вернётся: запустите монитор при рабочей сети или запишите UNC обратно.
+Для общей автозагрузки добавьте `-AllUsers`. Удаляются ярлык автозапуска и задача планировщика. Журнал и локальные копии ярлыков остаются. Ключ `-InstallDir` дополнительно удаляет папку программы вместе с `config.json`. Если в момент удаления был включён локальный стол, сетевой путь сам не вернётся: запустите монитор при рабочей сети или запишите UNC обратно.
 
 ## Ограничения
 

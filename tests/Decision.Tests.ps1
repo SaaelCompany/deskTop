@@ -389,6 +389,18 @@ Assert-Equal 'string project' $withProjects.ServiceDeskProjects[1].Id 'Кадр�
 Assert-Equal 'project label' (Format-ServiceDeskProjectLabel $withProjects.ServiceDeskProjects[0]) 'IT Helpdesk (ITHD)'
 $projectUrl = Expand-ServiceDeskUrl -Url 'https://sd.example/{projectId}?user={login}' -Login 'CONTOSO\ivan' -Computer 'PC-1' -Project 'IT Helpdesk' -ProjectId 'ITHD'
 Assert-Equal 'project placeholder' $projectUrl 'https://sd.example/ITHD?user=CONTOSO%5Civan'
+Assert-True 'system account' (Test-InstallerSystemAccount 'NT AUTHORITY\SYSTEM')
+Assert-True 'local system account' (Test-InstallerSystemAccount 'LOCAL\SYSTEM')
+Assert-True 'user is not system' (-not (Test-InstallerSystemAccount 'CONTOSO\ivan'))
+Assert-Equal 'sccm scope' (Resolve-InstallerStartupScope -AllUsers $false -SystemAccount $true) 'AllUsers'
+Assert-Equal 'user scope' (Resolve-InstallerStartupScope -AllUsers $false -SystemAccount $false) 'CurrentUser'
+Assert-Equal 'explicit all users' (Resolve-InstallerStartupScope -AllUsers $true -SystemAccount $false) 'AllUsers'
+Assert-True 'system install waits for logon' (-not (Test-InstallerShouldLaunch -SystemAccount $true -NoLaunch $false))
+Assert-True 'user install launches' (Test-InstallerShouldLaunch -SystemAccount $false -NoLaunch $false)
+Assert-True 'nolaunch skips start' (-not (Test-InstallerShouldLaunch -SystemAccount $false -NoLaunch $true))
+Assert-True 'program folder accepted' (Test-DesktopSwitchInstallDir 'C:\Program Files\DesktopSwitch')
+Assert-True 'drive root rejected' (-not (Test-DesktopSwitchInstallDir 'C:\'))
+Assert-True 'unc install rejected' (-not (Test-DesktopSwitchInstallDir '\\sccm\share\DesktopSwitch'))
 $badJira = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ JiraBaseUrl = 'not a url' } })
 Assert-Equal 'bad jira dropped' $badJira.JiraBaseUrl ''
 $badProvider = $false
