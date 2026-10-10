@@ -333,6 +333,8 @@ Assert-Equal 'poll floor' $widgetCfg.NewsPollMinutes 1
 Assert-Equal 'corner fallback' $widgetCfg.WidgetCorner 'BottomRight'
 Assert-Equal 'widget can be disabled' $widgetCfg.WidgetEnabled $false
 Assert-Equal 'jira off by default' $widgetCfg.JiraBaseUrl ''
+Assert-Equal 'desk off without urls' $widgetCfg.ServiceDeskProvider 'None'
+Assert-Equal 'default category count' $widgetCfg.ServiceDeskCategories.Count 3
 $jiraCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{
     Widget = [pscustomobject]@{
         JiraBaseUrl = 'https://jira.example/jira'
@@ -342,8 +344,34 @@ $jiraCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{
 })
 Assert-Equal 'jira base kept' $jiraCfg.JiraBaseUrl 'https://jira.example/jira'
 Assert-Equal 'webhook kept beside jira' $jiraCfg.ServiceDeskApiUrl 'https://hooks.example/ticket'
+Assert-Equal 'webhook wins when both urls set' $jiraCfg.ServiceDeskProvider 'Webhook'
+$onlyJira = Get-EffectiveDesktopConfig ([pscustomobject]@{
+    Widget = [pscustomobject]@{ JiraBaseUrl = 'https://jira.example' }
+})
+Assert-Equal 'jira when it is the only target' $onlyJira.ServiceDeskProvider 'Jira'
+$forcedJira = Get-EffectiveDesktopConfig ([pscustomobject]@{
+    Widget = [pscustomobject]@{
+        ServiceDesk = 'Jira'
+        JiraBaseUrl = 'https://jira.example'
+        ServiceDeskApiUrl = 'https://hooks.example/ticket'
+    }
+})
+Assert-Equal 'explicit jira' $forcedJira.ServiceDeskProvider 'Jira'
+$otherDesk = Get-EffectiveDesktopConfig ([pscustomobject]@{
+    Widget = [pscustomobject]@{
+        ServiceDesk = 'Webhook'
+        ServiceDeskApiUrl = 'https://helpdesk.example/api/tickets'
+        Categories = @('Принтер', 'Доступ', 'Принтер')
+    }
+})
+Assert-Equal 'explicit webhook' $otherDesk.ServiceDeskProvider 'Webhook'
+Assert-Equal 'custom category' $otherDesk.ServiceDeskCategories[0] 'Принтер'
+Assert-Equal 'duplicate category dropped' $otherDesk.ServiceDeskCategories.Count 2
 $badJira = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ JiraBaseUrl = 'not a url' } })
 Assert-Equal 'bad jira dropped' $badJira.JiraBaseUrl ''
+$badProvider = $false
+try { Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ ServiceDesk = 'glpi' } }) | Out-Null } catch { $badProvider = $true }
+Assert-True 'unknown helpdesk mode throws' $badProvider
 $deskPage = '{"size":2,"start":0,"limit":50,"isLastPage":false,"values":[{"id":"1","projectId":"10001","projectKey":"ITHD","projectName":"IT Helpdesk"},{"id":"2","projectId":"10002","projectKey":"HR","projectName":"Кадры"}]}' | ConvertFrom-Json
 $desks = ConvertFrom-JiraServiceDesks $deskPage
 Assert-Equal 'desk count' @($desks).Count 2

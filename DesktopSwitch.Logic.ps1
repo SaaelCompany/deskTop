@@ -184,6 +184,11 @@ function Get-EffectiveDesktopConfig {
     $localRaw = [string](Get-Prop $Config 'LocalDesktopPath' '%LOCALAPPDATA%\DesktopSwitch\LocalDesktop')
     $logRaw = [string](Get-Prop $Config 'LogPath' '%LOCALAPPDATA%\DesktopSwitch\desktop-switch.log')
     $stateRaw = [string](Get-Prop $Config 'StatePath' '%LOCALAPPDATA%\DesktopSwitch\state.json')
+    $serviceDeskUrl = Select-SingleHttpUrl (Get-Prop $widget 'ServiceDeskUrl' '')
+    $serviceDeskApi = Select-SingleHttpUrl (Get-Prop $widget 'ServiceDeskApiUrl' '')
+    $jiraBaseUrl = Select-SingleHttpUrl (Get-Prop $widget 'JiraBaseUrl' '')
+    $serviceDeskProvider = Resolve-ServiceDeskProvider -Requested ([string](Get-Prop $widget 'ServiceDesk' '')) -JiraBaseUrl $jiraBaseUrl -ApiUrl $serviceDeskApi -PortalUrl $serviceDeskUrl
+    $serviceDeskCategories = Get-ServiceDeskCategories $widget
 
     return [pscustomobject]@{
         Enabled = ConvertTo-Bool (Get-Prop $Config 'Enabled' $false) $false
@@ -210,10 +215,12 @@ function Get-EffectiveDesktopConfig {
         WidgetTitle = ([string](Get-Prop $widget 'Title' 'Сервисная служба')).Trim()
         WidgetCorner = $cornerMap[$cornerKey]
         WidgetMargin = Get-ClampedMargin (ConvertTo-Int (Get-Prop $widget 'Margin' 16) 16)
-        ServiceDeskUrl = Select-SingleHttpUrl (Get-Prop $widget 'ServiceDeskUrl' '')
-        ServiceDeskApiUrl = Select-SingleHttpUrl (Get-Prop $widget 'ServiceDeskApiUrl' '')
+        ServiceDeskUrl = $serviceDeskUrl
+        ServiceDeskApiUrl = $serviceDeskApi
         ServiceDeskToken = ([string](Get-Prop $widget 'ServiceDeskToken' '')).Trim()
-        JiraBaseUrl = Select-SingleHttpUrl (Get-Prop $widget 'JiraBaseUrl' '')
+        ServiceDeskProvider = $serviceDeskProvider
+        ServiceDeskCategories = $serviceDeskCategories
+        JiraBaseUrl = $jiraBaseUrl
         NewsUrl = Select-SingleHttpUrl (Get-Prop $widget 'NewsUrl' '')
         NewsPollMinutes = Get-ClampedMinutes (ConvertTo-Int (Get-Prop $widget 'NewsPollMinutes' 10) 10)
     }
@@ -291,6 +298,71 @@ function Select-SingleHttpUrl {
     $clean = Select-HttpProbeUrl -Urls @([string]$Url)
     if ($clean.Count -eq 0) { return '' }
     return [string]$clean[0]
+}
+
+function Resolve-ServiceDeskProvider {
+    param(
+        [string]$Requested,
+        [string]$JiraBaseUrl,
+        [string]$ApiUrl,
+        [string]$PortalUrl
+    )
+    $key = ''
+    if ($null -ne $Requested) { $key = $Requested.Trim().ToLowerInvariant() }
+    $hasJira = -not [string]::IsNullOrWhiteSpace($JiraBaseUrl)
+    $hasApi = -not [string]::IsNullOrWhiteSpace($ApiUrl)
+    $hasPortal = -not [string]::IsNullOrWhiteSpace($PortalUrl)
+    if ($key -eq 'jira' -or $key -eq 'jsm') {
+        if ($hasJira) { return 'Jira' }
+        return 'None'
+    }
+    if ($key -eq 'webhook' -or $key -eq 'generic' -or $key -eq 'http' -or $key -eq 'json') {
+        if ($hasApi) { return 'Webhook' }
+        if ($hasPortal) { return 'Portal' }
+        return 'None'
+    }
+    if ($key -eq 'portal') {
+        if ($hasPortal) { return 'Portal' }
+        return 'None'
+    }
+    if ($key -eq 'none' -or $key -eq 'off' -or $key -eq 'нет') { return 'None' }
+    if ($key -ne '' -and $key -ne 'auto') {
+        throw "Неизвестное значение ServiceDesk '$Requested'. Допустимо: Auto, Webhook, Jira."
+    }
+    # A filled webhook address is the universal path and stays selected when a Jira
+    # address is also present. Jira is used automatically only when it is the only target.
+    if ($hasApi) { return 'Webhook' }
+    if ($hasJira) { return 'Jira' }
+    if ($hasPortal) { return 'Portal' }
+    return 'None'
+}
+
+function Get-ServiceDeskCategories {
+    param($Widget)
+    $items = New-Object System.Collections.Generic.List[string]
+    $seen = @{}
+    $node = Get-Prop $Widget 'Categories' $null
+    $raw = @()
+    if ($null -ne $node) {
+        if ($node -is [System.Array]) { $raw = $node }
+        else { $raw = @([string]$node) }
+    }
+    foreach ($candidate in $raw) {
+        $name = ([string]$candidate).Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        if ($name.Length -gt 80) { $name = $name.Substring(0, 80) }
+        $marker = $name.ToLowerInvariant()
+        if ($seen.ContainsKey($marker)) { continue }
+        $seen[$marker] = $true
+        $items.Add($name)
+        if ($items.Count -ge 30) { break }
+    }
+    if ($items.Count -eq 0) {
+        $items.Add('Инцидент')
+        $items.Add('Запрос обслуживания')
+        $items.Add('Вопрос')
+    }
+    return ,$items.ToArray()
 }
 
 function Get-DesktopModeFromPath {

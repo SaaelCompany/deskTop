@@ -424,7 +424,7 @@ function Update-NewsRows {
 
 function Test-JiraTicketMode {
     if ($null -eq $script:Cfg) { return $false }
-    return -not [string]::IsNullOrWhiteSpace([string]$script:Cfg.JiraBaseUrl)
+    return [string]$script:Cfg.ServiceDeskProvider -eq 'Jira'
 }
 
 function Get-WidgetPortalUrl {
@@ -432,9 +432,17 @@ function Get-WidgetPortalUrl {
     $jira = ''
     if ($script:Cfg) {
         $explicit = [string]$script:Cfg.ServiceDeskUrl
-        $jira = [string]$script:Cfg.JiraBaseUrl
+        if (Test-JiraTicketMode) { $jira = [string]$script:Cfg.JiraBaseUrl }
     }
     return Get-JiraPortalUrl -BaseUrl $jira -ExplicitUrl $explicit
+}
+
+function Get-WebhookCategoryNames {
+    $fallback = @('Инцидент', 'Запрос обслуживания', 'Вопрос')
+    if ($null -eq $script:Cfg) { return ,$fallback }
+    $configured = $script:Cfg.ServiceDeskCategories
+    if ($null -eq $configured -or $configured.Count -eq 0) { return ,$fallback }
+    return ,$configured
 }
 
 function Set-TicketFieldLayout {
@@ -850,10 +858,10 @@ function New-SupportPanel {
     $category = New-Object System.Windows.Forms.ComboBox
     $category.DropDownStyle = 'DropDownList'
     if (-not (Test-JiraTicketMode)) {
-        [void]$category.Items.Add('Инцидент')
-        [void]$category.Items.Add('Запрос обслуживания')
-        [void]$category.Items.Add('Вопрос')
-        $category.SelectedIndex = 0
+        foreach ($name in (Get-WebhookCategoryNames)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$name)) { [void]$category.Items.Add([string]$name) }
+        }
+        if ($category.Items.Count -gt 0) { $category.SelectedIndex = 0 }
     }
     $category.SetBounds(10, 58, 280, 22)
     $subjectLabel = New-Object System.Windows.Forms.Label

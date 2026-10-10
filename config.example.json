@@ -1,5 +1,5 @@
 ﻿{
-  "Note": "Скопируйте этот файл в config.json и поставьте Enabled в true. NetworkDesktopPath оставьте пустым: путь общего стола читается из политики пользователя и может отличаться. Права администратора пользователю не нужны. Программу положите на локальный диск. В углу экрана будет круглая кнопка: по ней открывается окно заявки и новостей. Логин Windows и имя компьютера программа берёт из сеанса сама. В ServiceDeskUrl можно указать {login} и {computer}. Для Jira 8.21 и Jira Service Management 4.21 укажите Widget.JiraBaseUrl, например https://jira.company.local. Проекты helpdesk подтянутся сами.",
+  "Note": "Скопируйте этот файл в config.json и поставьте Enabled в true. NetworkDesktopPath оставьте пустым: путь общего стола читается из политики пользователя и может отличаться. Права администратора пользователю не нужны. Программу положите на локальный диск. В углу экрана будет круглая кнопка: по ней открывается окно заявки и новостей. Логин Windows и имя компьютера программа берёт из сеанса сама. В ServiceDeskUrl можно указать {login} и {computer}. ServiceDesk Auto отправляет заявку на ServiceDeskApiUrl. Это универсальный JSON для любого helpdesk. Для Jira укажите ServiceDesk Jira и JiraBaseUrl.",
   "Enabled": false,
   "NetworkDesktopPath": "",
   "LocalDesktopPath": "%LOCALAPPDATA%\\DesktopSwitch\\LocalDesktop",
@@ -29,9 +29,11 @@
     "Title": "Сервисная служба",
     "Corner": "BottomRight",
     "Margin": 16,
+    "ServiceDesk": "Auto",
     "ServiceDeskUrl": "",
     "ServiceDeskApiUrl": "",
     "ServiceDeskToken": "",
+    "Categories": ["Инцидент", "Запрос обслуживания", "Вопрос"],
     "JiraBaseUrl": "",
     "NewsUrl": "",
     "NewsPollMinutes": 10
