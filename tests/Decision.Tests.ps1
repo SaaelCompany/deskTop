@@ -336,6 +336,19 @@ Assert-Equal 'news url kept' $widgetCfg.NewsUrl 'https://intranet.example/news.j
 Assert-Equal 'poll floor' $widgetCfg.NewsPollMinutes 1
 Assert-Equal 'corner fallback' $widgetCfg.WidgetCorner 'BottomRight'
 Assert-Equal 'widget can be disabled' $widgetCfg.WidgetEnabled $false
+Assert-Equal 'theme light by default' (Resolve-AppThemeLight $null) $true
+Assert-Equal 'theme light one' (Resolve-AppThemeLight 1) $true
+Assert-Equal 'theme dark zero' (Resolve-AppThemeLight 0) $false
+Assert-Equal 'theme dark text' (Resolve-AppThemeLight '0') $false
+Assert-Equal 'theme keeps light on junk' (Resolve-AppThemeLight 'auto') $true
+Assert-Equal 'launcher shown by default' (Resolve-ShowLauncher $null) $true
+Assert-Equal 'launcher can hide' (Resolve-ShowLauncher $false) $false
+Assert-Equal 'launcher hide text' (Resolve-ShowLauncher 'нет') $false
+$lightPalette = Get-WidgetPalette -Light $true
+$darkPalette = Get-WidgetPalette -Light $false
+Assert-Equal 'light card' $lightPalette.Canvas[0] 255
+Assert-True 'dark card' ($darkPalette.Canvas[0] -lt 80)
+Assert-Equal 'shared accent' $lightPalette.Accent[0] $darkPalette.Accent[0]
 Assert-Equal 'jira off by default' $widgetCfg.JiraBaseUrl ''
 Assert-Equal 'desk off without urls' $widgetCfg.ServiceDeskProvider 'None'
 Assert-Equal 'default category count' $widgetCfg.ServiceDeskCategories.Count 3

@@ -32,6 +32,14 @@ $script:JiraDesks = @()
 $script:JiraRequestTypes = @()
 $script:JiraLoaded = $false
 $script:JiraLoading = $false
+$script:WidgetPalette = $null
+$script:AppThemeLight = $true
+$script:LauncherMenuItem = $null
+$script:TrayMenu = $null
+$script:ThemeHooked = $false
+$script:ThemeHandler = $null
+$script:ApplyingTheme = $false
+$script:PopupNotices = @()
 
 $script:DesktopHostSource = @'
 using System;
@@ -186,6 +194,51 @@ function Get-WidgetMargin {
     return $margin
 }
 
+function Get-ThemeColor {
+    param([string]$Name)
+    if ($null -eq $script:WidgetPalette) { $script:WidgetPalette = Get-WidgetPalette -Light $true }
+    $rgb = $script:WidgetPalette[$Name]
+    return [System.Drawing.Color]::FromArgb([int]$rgb[0], [int]$rgb[1], [int]$rgb[2])
+}
+
+function Read-AppThemeLight {
+    $value = $null
+    try {
+        $item = Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name 'AppsUseLightTheme' -ErrorAction Stop
+        $value = $item.AppsUseLightTheme
+    } catch { }
+    return Resolve-AppThemeLight $value
+}
+
+function Enable-AppThemeMode {
+    if (-not ('ThemeNative' -as [type])) {
+        try {
+            $native = @'
+using System;
+using System.Runtime.InteropServices;
+public static class ThemeNative {
+    [DllImport("uxtheme.dll", EntryPoint = "#135")]
+    public static extern int SetPreferredAppMode(int mode);
+    [DllImport("uxtheme.dll", EntryPoint = "#136")]
+    public static extern void FlushMenuThemes();
+}
+'@
+            Add-Type -TypeDefinition $native -ErrorAction Stop
+        } catch {
+            return
+        }
+    }
+    try {
+        [ThemeNative]::SetPreferredAppMode(1) | Out-Null
+        [ThemeNative]::FlushMenuThemes()
+    } catch { }
+}
+
+function Test-ShowLauncher {
+    if ($null -eq $script:State) { return $true }
+    return Resolve-ShowLauncher $script:State.ShowLauncher
+}
+
 function Get-WidgetCorner {
     $corner = 'BottomRight'
     if ($script:Cfg -and -not [string]::IsNullOrWhiteSpace([string]$script:Cfg.WidgetCorner)) {
@@ -198,15 +251,178 @@ function Get-SupportStatus {
     $mode = [string]$script:DesktopMode
     $verdict = [string]$script:DesktopVerdict
     $text = 'Проверка сети'
-    $color = [System.Drawing.Color]::FromArgb(113, 113, 122)
+    $color = Get-ThemeColor StatusMuted
     if ($mode -eq 'Local') {
         $text = 'Локальный стол'
-        $color = [System.Drawing.Color]::FromArgb(185, 28, 28)
+        $color = Get-ThemeColor StatusLocal
     } elseif ($mode -eq 'Network') {
         $text = 'Сетевой стол'
-        if ($verdict -eq 'Online') { $color = [System.Drawing.Color]::FromArgb(22, 101, 52) }
+        if ($verdict -eq 'Online') { $color = Get-ThemeColor StatusOnline }
     }
     return [pscustomobject]@{ Text = $text; Color = $color }
+}
+
+function Update-SoftFieldTheme {
+    param($Field, [bool]$ReadOnly)
+    if ($null -eq $Field) { return }
+    $border = Get-ThemeColor FieldBorder
+    $fill = Get-ThemeColor FieldFill
+    if ($ReadOnly) { $fill = Get-ThemeColor FieldReadOnly }
+    $ink = Get-ThemeColor Ink
+    $icon = Get-ThemeColor Icon
+    $Field.Shell.BackColor = $border
+    $Field.Fill.BackColor = $fill
+    $Field.Icon.BackColor = $fill
+    $Field.Icon.ForeColor = $icon
+    $Field.Editor.BackColor = $fill
+    $Field.Editor.ForeColor = $ink
+}
+
+function Apply-TrayMenuPalette {
+    if ($null -eq $script:TrayMenu) { return }
+    $canvas = Get-ThemeColor Canvas
+    $ink = Get-ThemeColor Ink
+    $script:TrayMenu.BackColor = $canvas
+    $script:TrayMenu.ForeColor = $ink
+    foreach ($item in @($script:TrayMenu.Items)) {
+        if ($item -is [System.Windows.Forms.ToolStripSeparator]) { continue }
+        $item.BackColor = $canvas
+        $item.ForeColor = $ink
+    }
+}
+
+function Apply-NewsPopupPalette {
+    if ($null -eq $script:NewsPopup -or $script:NewsPopup.IsDisposed) { return }
+    $canvas = Get-ThemeColor Canvas
+    $ink = Get-ThemeColor Ink
+    $muted = Get-ThemeColor Muted
+    $hover = Get-ThemeColor Hover
+    $rule = Get-ThemeColor Rule
+    $script:NewsPopup.BackColor = $canvas
+    if ($script:NewsPopupHeader) { $script:NewsPopupHeader.BackColor = $canvas }
+    if ($script:NewsPopupTitle) {
+        $script:NewsPopupTitle.ForeColor = $ink
+        $script:NewsPopupTitle.BackColor = $canvas
+    }
+    if ($script:NewsPopupClose) {
+        $script:NewsPopupClose.BackColor = $canvas
+        $script:NewsPopupClose.ForeColor = $muted
+        $script:NewsPopupClose.FlatAppearance.MouseOverBackColor = $hover
+    }
+    if ($script:NewsPopupRule) { $script:NewsPopupRule.BackColor = $rule }
+    if ($script:NewsPopupBody) { $script:NewsPopupBody.BackColor = $canvas }
+    if ($script:NewsPopup.Visible -and $script:PopupNotices) {
+        Show-NewsPopup -Notices $script:PopupNotices
+    }
+}
+
+function Apply-WidgetPalette {
+    if ($null -eq $script:WidgetUi) { return }
+    $ui = $script:WidgetUi
+    $canvas = Get-ThemeColor Canvas
+    $ink = Get-ThemeColor Ink
+    $muted = Get-ThemeColor Muted
+    $label = Get-ThemeColor Label
+    $hover = Get-ThemeColor Hover
+    $rule = Get-ThemeColor Rule
+    $accent = Get-ThemeColor Accent
+    if ($script:PanelForm -and -not $script:PanelForm.IsDisposed) { $script:PanelForm.BackColor = $canvas }
+    $ui.Header.BackColor = $canvas
+    $ui.TitleLabel.ForeColor = $ink
+    $ui.TitleLabel.BackColor = $canvas
+    $ui.Identity.ForeColor = $muted
+    $ui.Identity.BackColor = $canvas
+    $ui.Status.BackColor = $canvas
+    $ui.CloseButton.BackColor = $canvas
+    $ui.CloseButton.ForeColor = $muted
+    $ui.CloseButton.FlatAppearance.MouseOverBackColor = $hover
+    $ui.HeaderRule.BackColor = $rule
+    $ui.Sheet.BackColor = $canvas
+    $ui.TicketTab.BackColor = $canvas
+    $ui.NewsTab.BackColor = $canvas
+    $ui.TicketTab.FlatAppearance.MouseOverBackColor = $hover
+    $ui.NewsTab.FlatAppearance.MouseOverBackColor = $hover
+    $ui.TabLine.BackColor = $accent
+    $ui.NewsPage.BackColor = $canvas
+    $ui.TicketPage.BackColor = $canvas
+    $ui.NewsList.BackColor = $canvas
+    foreach ($name in @('LoginLabel', 'ComputerLabel', 'ProjectLabel', 'CategoryLabel', 'SubjectLabel', 'BodyLabel')) {
+        $ui[$name].ForeColor = $label
+        $ui[$name].BackColor = $canvas
+    }
+    $ui.TicketStatus.BackColor = $canvas
+    $ui.PortalLink.BackColor = $canvas
+    $ui.PortalLink.LinkColor = $accent
+    $ui.PortalLink.ActiveLinkColor = $accent
+    $ui.SendButton.BackColor = $accent
+    $ui.SendButton.FlatAppearance.MouseOverBackColor = (Get-ThemeColor AccentHover)
+    Update-SoftFieldTheme $ui.LoginField $true
+    Update-SoftFieldTheme $ui.ComputerField $true
+    Update-SoftFieldTheme $ui.ProjectField $false
+    Update-SoftFieldTheme $ui.CategoryField $false
+    Update-SoftFieldTheme $ui.SubjectField $false
+    Update-SoftFieldTheme $ui.BodyField $false
+    Apply-SupportPageVisual -Page $script:WidgetPage
+    Update-NewsRows
+    $script:NewsSignature = Get-NewsSignature
+    Apply-NewsPopupPalette
+    Apply-TrayMenuPalette
+    if ($script:WidgetForm -and -not $script:WidgetForm.IsDisposed) { $script:WidgetForm.Invalidate() }
+}
+
+function Sync-WidgetTheme {
+    param([switch]$Force)
+    if ($script:ApplyingTheme) { return }
+    $light = Read-AppThemeLight
+    if (-not $Force -and $null -ne $script:WidgetPalette -and [bool]$script:AppThemeLight -eq [bool]$light) { return }
+    $script:AppThemeLight = $light
+    $script:WidgetPalette = Get-WidgetPalette -Light $light
+    $script:ApplyingTheme = $true
+    try { Apply-WidgetPalette } finally { $script:ApplyingTheme = $false }
+}
+
+function Register-ThemeChanges {
+    if ($script:ThemeHooked) { return }
+    $script:ThemeHandler = {
+        try {
+            $form = $script:WidgetForm
+            if ($null -eq $form -or $form.IsDisposed -or -not $form.IsHandleCreated) { return }
+            $form.BeginInvoke([System.Action]{ Sync-WidgetTheme }) | Out-Null
+        } catch { }
+    }
+    try {
+        [Microsoft.Win32.SystemEvents]::add_UserPreferenceChanged($script:ThemeHandler)
+        $script:ThemeHooked = $true
+    } catch { }
+}
+
+function Unregister-ThemeChanges {
+    if (-not $script:ThemeHooked) { return }
+    try { [Microsoft.Win32.SystemEvents]::remove_UserPreferenceChanged($script:ThemeHandler) } catch { }
+    $script:ThemeHooked = $false
+}
+
+function Set-LauncherChrome {
+    $show = Test-ShowLauncher
+    if ($script:LauncherMenuItem) { $script:LauncherMenuItem.Checked = $show }
+    $launcher = $script:WidgetForm
+    if ($null -eq $launcher -or $launcher.IsDisposed) { return }
+    if (-not $show) {
+        if ($script:PanelForm -and -not $script:PanelForm.IsDisposed -and $script:PanelForm.Owner -eq $launcher) {
+            $script:PanelForm.Owner = $null
+        }
+        if ($script:NewsPopup -and -not $script:NewsPopup.IsDisposed -and $script:NewsPopup.Owner -eq $launcher) {
+            $script:NewsPopup.Owner = $null
+        }
+        if ($launcher.Visible) { $launcher.Hide() }
+        return
+    }
+    if (-not $launcher.Visible) { $launcher.Show() }
+    if ($script:PanelForm -and -not $script:PanelForm.IsDisposed) { $script:PanelForm.Owner = $launcher }
+    if ($script:NewsPopup -and -not $script:NewsPopup.IsDisposed) { $script:NewsPopup.Owner = $launcher }
+    if ('DesktopHost' -as [type] -and $launcher.IsHandleCreated) {
+        try { [DesktopHost]::PrepareLauncher($launcher.Handle) } catch { }
+    }
 }
 
 function Format-NoticeStamp {
@@ -335,12 +551,12 @@ function New-FlatButton {
     $button.Location = $Location
     $button.Size = $Size
     $button.FlatStyle = 'Flat'
-    $button.BackColor = [System.Drawing.Color]::FromArgb(47, 107, 255)
+    $button.BackColor = Get-ThemeColor Accent
     $button.ForeColor = [System.Drawing.Color]::White
     if ($script:ButtonFont) { $button.Font = $script:ButtonFont }
     else { $button.Font = $script:TabFontBold }
     $button.FlatAppearance.BorderSize = 0
-    $button.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(37, 90, 230)
+    $button.FlatAppearance.MouseOverBackColor = Get-ThemeColor AccentHover
     $button.Cursor = [System.Windows.Forms.Cursors]::Hand
     $button.Image = New-SendGlyph
     $button.TextImageRelation = 'ImageBeforeText'
@@ -379,11 +595,11 @@ function New-SoftField {
         [int]$Width = 328,
         [int]$Height = 40
     )
-    $border = [System.Drawing.Color]::FromArgb(226, 232, 240)
-    $fillColor = [System.Drawing.Color]::White
-    if ($ReadOnly) { $fillColor = [System.Drawing.Color]::FromArgb(248, 250, 252) }
-    $iconColor = [System.Drawing.Color]::FromArgb(148, 163, 184)
-    $ink = [System.Drawing.Color]::FromArgb(24, 24, 27)
+    $border = Get-ThemeColor FieldBorder
+    $fillColor = Get-ThemeColor FieldFill
+    if ($ReadOnly) { $fillColor = Get-ThemeColor FieldReadOnly }
+    $iconColor = Get-ThemeColor Icon
+    $ink = Get-ThemeColor Ink
     $shell = New-Object System.Windows.Forms.Panel
     $shell.Size = New-Object System.Drawing.Size($Width, $Height)
     $shell.BackColor = $border
@@ -407,6 +623,28 @@ function New-SoftField {
         $editor.BackColor = $fillColor
         $editor.ForeColor = $ink
         $editor.SetBounds(34, 7, ($Width - 48), 24)
+        $editor.DrawMode = 'OwnerDrawFixed'
+        $editor.ItemHeight = 22
+        $combo = $editor
+        $editor.Add_DrawItem({
+            if ($_.Index -lt 0) { return }
+            $selected = ($_.State -band [System.Windows.Forms.DrawItemState]::Selected) -ne 0
+            $editing = ($_.State -band [System.Windows.Forms.DrawItemState]::ComboBoxEdit) -ne 0
+            $bg = Get-ThemeColor FieldFill
+            $fg = Get-ThemeColor Ink
+            if ($selected -and -not $editing) {
+                $bg = Get-ThemeColor Accent
+                $fg = [System.Drawing.Color]::White
+            }
+            $brush = New-Object System.Drawing.SolidBrush $bg
+            $_.Graphics.FillRectangle($brush, $_.Bounds)
+            $brush.Dispose()
+            $textBrush = New-Object System.Drawing.SolidBrush $fg
+            $text = ''
+            if ($_.Index -lt $combo.Items.Count) { $text = [string]$combo.Items[$_.Index] }
+            $_.Graphics.DrawString($text, $combo.Font, $textBrush, ($_.Bounds.X + 4), ($_.Bounds.Y + 3))
+            $textBrush.Dispose()
+        }.GetNewClosure())
     } elseif ($Kind -eq 'Note') {
         $editor = New-Object System.Windows.Forms.TextBox
         $editor.Multiline = $true
@@ -488,16 +726,16 @@ function Update-NewsRows {
         $empty.Text = 'Пока нет сообщений'
         $empty.TextAlign = 'MiddleCenter'
         $empty.Font = $script:TabFontBold
-        $empty.ForeColor = [System.Drawing.Color]::FromArgb(31, 41, 51)
-        $empty.BackColor = [System.Drawing.Color]::White
+        $empty.ForeColor = Get-ThemeColor Empty
+        $empty.BackColor = Get-ThemeColor Canvas
         $emptyWidth = [int]$script:SupportPanelWidth - 32
         $empty.SetBounds(16, 48, $emptyWidth, 24)
         $hint = New-Object System.Windows.Forms.Label
         $hint.Text = 'Здесь будут новости и технические работы.'
         $hint.TextAlign = 'MiddleCenter'
         $hint.Font = $script:TabFont
-        $hint.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
-        $hint.BackColor = [System.Drawing.Color]::White
+        $hint.ForeColor = Get-ThemeColor Muted
+        $hint.BackColor = Get-ThemeColor Canvas
         $hint.SetBounds(16, 76, $emptyWidth, 36)
         $list.Controls.Add($empty)
         $list.Controls.Add($hint)
@@ -509,13 +747,13 @@ function Update-NewsRows {
         $url = [string]$item.Url
         $row = New-Object System.Windows.Forms.Panel
         $row.SetBounds(16, $y, $rowWidth, 64)
-        $row.BackColor = [System.Drawing.Color]::White
+        $row.BackColor = Get-ThemeColor Canvas
         $row.Tag = $url
         $rowColor = $row.BackColor
         $dot = New-Object System.Windows.Forms.Panel
         $dot.SetBounds(4, 16, 6, 6)
-        $dotColor = [System.Drawing.Color]::FromArgb(24, 24, 27)
-        if ([string]$item.Kind -eq 'maintenance') { $dotColor = [System.Drawing.Color]::FromArgb(180, 83, 9) }
+        $dotColor = Get-ThemeColor Ink
+        if ([string]$item.Kind -eq 'maintenance') { $dotColor = Get-ThemeColor Maintenance }
         $dot.BackColor = $dotColor
         $dotPath = New-Object System.Drawing.Drawing2D.GraphicsPath
         $dotPath.AddEllipse(0, 0, 6, 6)
@@ -524,7 +762,7 @@ function Update-NewsRows {
         $title = New-Object System.Windows.Forms.Label
         $title.Text = [string]$item.Title
         $title.Font = $script:RowTitleFont
-        $title.ForeColor = [System.Drawing.Color]::FromArgb(24, 24, 27)
+        $title.ForeColor = Get-ThemeColor Ink
         $title.BackColor = $rowColor
         $title.AutoEllipsis = $true
         $title.SetBounds(18, 4, ($rowWidth - 128), 18)
@@ -532,7 +770,7 @@ function Update-NewsRows {
         $when = New-Object System.Windows.Forms.Label
         $when.Text = Format-NoticeStamp ([string]$item.PublishedAt)
         $when.Font = $script:RowBodyFont
-        $when.ForeColor = [System.Drawing.Color]::FromArgb(113, 113, 122)
+        $when.ForeColor = Get-ThemeColor Muted
         $when.BackColor = $rowColor
         $when.TextAlign = 'MiddleRight'
         $when.SetBounds(($rowWidth - 100), 4, 92, 18)
@@ -540,12 +778,12 @@ function Update-NewsRows {
         $body = New-Object System.Windows.Forms.Label
         $body.Text = Get-NoticeSnippet ([string]$item.Body)
         $body.Font = $script:RowBodyFont
-        $body.ForeColor = [System.Drawing.Color]::FromArgb(113, 113, 122)
+        $body.ForeColor = Get-ThemeColor Muted
         $body.BackColor = $rowColor
         $body.SetBounds(18, 24, ($rowWidth - 28), 32)
         $rule = New-Object System.Windows.Forms.Panel
         $rule.SetBounds(0, 63, $rowWidth, 1)
-        $rule.BackColor = [System.Drawing.Color]::FromArgb(244, 244, 245)
+        $rule.BackColor = Get-ThemeColor Rule
         $body.Tag = $url
         $targetUrl = $url
         $openNotice = {
@@ -700,7 +938,7 @@ function Update-TicketActions {
         $ui.SendButton.Text = 'Отправить заявку'
         $ui.SendButton.Enabled = $false
         if ([string]::IsNullOrWhiteSpace([string]$ui.TicketStatus.Text)) {
-            $ui.TicketStatus.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
+            $ui.TicketStatus.ForeColor = Get-ThemeColor Muted
             $ui.TicketStatus.Text = 'Адрес сервис-деска задаёт администратор в config.json.'
         }
     }
@@ -715,8 +953,8 @@ function Apply-SupportPageVisual {
     $newsOn = $Page -eq 'News'
     $ui.NewsPage.Visible = $newsOn
     $ui.TicketPage.Visible = -not $newsOn
-    $ink = [System.Drawing.Color]::FromArgb(24, 24, 27)
-    $muted = [System.Drawing.Color]::FromArgb(113, 113, 122)
+    $ink = Get-ThemeColor Ink
+    $muted = Get-ThemeColor Muted
     if ($newsOn) {
         $ui.NewsTab.ForeColor = $ink
         $ui.TicketTab.ForeColor = $muted
@@ -745,6 +983,7 @@ function Select-SupportPage {
 }
 
 function Update-WidgetChrome {
+    Sync-WidgetTheme
     if ($null -eq $script:WidgetForm -or $script:WidgetForm.IsDisposed -or $null -eq $script:WidgetUi) { return }
     $ui = $script:WidgetUi
     $status = Get-SupportStatus
@@ -817,7 +1056,7 @@ function New-LauncherButton {
     $form.ShowInTaskbar = $false
     $form.StartPosition = 'Manual'
     $form.TopMost = $true
-    $form.BackColor = [System.Drawing.Color]::FromArgb(47, 107, 255)
+    $form.BackColor = Get-ThemeColor Accent
     $form.ClientSize = New-Object System.Drawing.Size(52, 52)
     $form.Text = Get-WidgetTitle
     $form.Cursor = [System.Windows.Forms.Cursors]::Hand
@@ -827,8 +1066,8 @@ function New-LauncherButton {
     $form.Add_Paint({
         $g = $_.Graphics
         $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-        $fill = [System.Drawing.Color]::FromArgb(47, 107, 255)
-        if ($script:LauncherHot) { $fill = [System.Drawing.Color]::FromArgb(37, 90, 230) }
+        $fill = Get-ThemeColor Accent
+        if ($script:LauncherHot) { $fill = Get-ThemeColor AccentHover }
         $brush = New-Object System.Drawing.SolidBrush $fill
         $g.FillEllipse($brush, 0, 0, 51, 51)
         $brush.Dispose()
@@ -857,7 +1096,7 @@ function New-LauncherButton {
             $format = New-Object System.Drawing.StringFormat
             $format.Alignment = [System.Drawing.StringAlignment]::Center
             $format.LineAlignment = [System.Drawing.StringAlignment]::Center
-            $ink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(47, 107, 255))
+            $ink = New-Object System.Drawing.SolidBrush (Get-ThemeColor Accent)
             $rect = New-Object System.Drawing.RectangleF(32, 2, 16, 16)
             $g.DrawString($text, $font, $ink, $rect, $format)
             $ink.Dispose()
@@ -885,11 +1124,13 @@ function New-LauncherButton {
 }
 
 function New-SupportPanel {
-    $accent = [System.Drawing.Color]::FromArgb(47, 107, 255)
-    $headerColor = [System.Drawing.Color]::White
-    $ink = [System.Drawing.Color]::FromArgb(24, 24, 27)
-    $muted = [System.Drawing.Color]::FromArgb(113, 113, 122)
-    $labelColor = [System.Drawing.Color]::FromArgb(71, 85, 105)
+    $accent = Get-ThemeColor Accent
+    $headerColor = Get-ThemeColor Canvas
+    $ink = Get-ThemeColor Ink
+    $muted = Get-ThemeColor Muted
+    $labelColor = Get-ThemeColor Label
+    $hover = Get-ThemeColor Hover
+    $ruleColor = Get-ThemeColor Rule
     $panelW = [int]$script:SupportPanelWidth
     $panelH = [int]$script:SupportPanelHeight
     $headerH = 76
@@ -900,7 +1141,7 @@ function New-SupportPanel {
     $panel.ShowInTaskbar = $false
     $panel.StartPosition = 'Manual'
     $panel.TopMost = $true
-    $panel.BackColor = [System.Drawing.Color]::White
+    $panel.BackColor = $headerColor
     $panel.ClientSize = New-Object System.Drawing.Size($panelW, $panelH)
     $panel.Text = Get-WidgetTitle
     $panel.Font = $script:TabFont
@@ -952,7 +1193,7 @@ function New-SupportPanel {
     $close.SetBounds(($panelW - 40), 12, 28, 24)
     $close.FlatStyle = 'Flat'
     $close.FlatAppearance.BorderSize = 0
-    $close.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(244, 244, 245)
+    $close.FlatAppearance.MouseOverBackColor = $hover
     $close.BackColor = $headerColor
     $close.ForeColor = $muted
     $close.Font = $script:TitleFont
@@ -967,7 +1208,7 @@ function New-SupportPanel {
 
     $sheet = New-Object System.Windows.Forms.Panel
     $sheet.SetBounds(0, $headerH, $panelW, ($panelH - $headerH))
-    $sheet.BackColor = [System.Drawing.Color]::White
+    $sheet.BackColor = $headerColor
 
     $ticketTab = New-Object System.Windows.Forms.Button
     $ticketTab.Text = 'Заявка'
@@ -976,8 +1217,8 @@ function New-SupportPanel {
     $ticketTab.Padding = New-Object System.Windows.Forms.Padding(12, 0, 0, 0)
     $ticketTab.FlatStyle = 'Flat'
     $ticketTab.FlatAppearance.BorderSize = 0
-    $ticketTab.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(244, 244, 245)
-    $ticketTab.BackColor = [System.Drawing.Color]::White
+    $ticketTab.FlatAppearance.MouseOverBackColor = $hover
+    $ticketTab.BackColor = $headerColor
     $ticketTab.ForeColor = $ink
     $ticketTab.Font = $script:TabFontBold
     $ticketTab.Cursor = [System.Windows.Forms.Cursors]::Hand
@@ -994,8 +1235,8 @@ function New-SupportPanel {
     $newsTab.Padding = New-Object System.Windows.Forms.Padding(16, 0, 0, 0)
     $newsTab.FlatStyle = 'Flat'
     $newsTab.FlatAppearance.BorderSize = 0
-    $newsTab.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(244, 244, 245)
-    $newsTab.BackColor = [System.Drawing.Color]::White
+    $newsTab.FlatAppearance.MouseOverBackColor = $hover
+    $newsTab.BackColor = $headerColor
     $newsTab.ForeColor = $muted
     $newsTab.Font = $script:TabFont
     $newsTab.Cursor = [System.Windows.Forms.Cursors]::Hand
@@ -1007,16 +1248,16 @@ function New-SupportPanel {
     $newsPage = New-Object System.Windows.Forms.Panel
     $newsPage.SetBounds(0, $pageY, $panelW, $pageH)
     $newsPage.Visible = $false
-    $newsPage.BackColor = [System.Drawing.Color]::White
+    $newsPage.BackColor = $headerColor
     $newsList = New-Object System.Windows.Forms.Panel
     $newsList.Dock = 'Fill'
     $newsList.AutoScroll = $true
-    $newsList.BackColor = [System.Drawing.Color]::White
+    $newsList.BackColor = $headerColor
     $newsPage.Controls.Add($newsList)
 
     $ticketPage = New-Object System.Windows.Forms.Panel
     $ticketPage.SetBounds(0, $pageY, $panelW, $pageH)
-    $ticketPage.BackColor = [System.Drawing.Color]::White
+    $ticketPage.BackColor = $headerColor
     $ticketPage.Visible = $true
     $fieldW = $panelW - 32
     $iconUser = [string][char]0xE77B
@@ -1027,7 +1268,7 @@ function New-SupportPanel {
     $loginLabel = New-Object System.Windows.Forms.Label
     $loginLabel.Text = 'Логин Windows'
     $loginLabel.ForeColor = $labelColor
-    $loginLabel.BackColor = [System.Drawing.Color]::White
+    $loginLabel.BackColor = $headerColor
     $loginLabel.SetBounds(16, 2, $fieldW, 14)
     $loginField = New-SoftField -Kind Text -Icon $iconUser -ReadOnly -Width $fieldW -Height 40
     $loginHost = $loginField.Shell
@@ -1035,7 +1276,7 @@ function New-SupportPanel {
     $computerLabel = New-Object System.Windows.Forms.Label
     $computerLabel.Text = 'Компьютер'
     $computerLabel.ForeColor = $labelColor
-    $computerLabel.BackColor = [System.Drawing.Color]::White
+    $computerLabel.BackColor = $headerColor
     $computerLabel.SetBounds(16, 66, $fieldW, 14)
     $computerField = New-SoftField -Kind Text -Icon $iconPc -ReadOnly -Width $fieldW -Height 40
     $computerHost = $computerField.Shell
@@ -1043,7 +1284,7 @@ function New-SupportPanel {
     $projectLabel = New-Object System.Windows.Forms.Label
     $projectLabel.Text = 'Проект'
     $projectLabel.ForeColor = $labelColor
-    $projectLabel.BackColor = [System.Drawing.Color]::White
+    $projectLabel.BackColor = $headerColor
     $projectLabel.Visible = $false
     $projectLabel.SetBounds(16, 130, $fieldW, 14)
     $projectField = New-SoftField -Kind Combo -Icon $iconList -Width $fieldW -Height 40
@@ -1058,7 +1299,7 @@ function New-SupportPanel {
     $categoryLabel = New-Object System.Windows.Forms.Label
     $categoryLabel.Text = 'Категория'
     $categoryLabel.ForeColor = $labelColor
-    $categoryLabel.BackColor = [System.Drawing.Color]::White
+    $categoryLabel.BackColor = $headerColor
     $categoryLabel.SetBounds(16, 130, $fieldW, 14)
     $categoryField = New-SoftField -Kind Combo -Icon $iconList -Width $fieldW -Height 40
     $categoryHost = $categoryField.Shell
@@ -1079,7 +1320,7 @@ function New-SupportPanel {
     $subjectLabel = New-Object System.Windows.Forms.Label
     $subjectLabel.Text = 'Тема'
     $subjectLabel.ForeColor = $labelColor
-    $subjectLabel.BackColor = [System.Drawing.Color]::White
+    $subjectLabel.BackColor = $headerColor
     $subjectLabel.SetBounds(16, 194, $fieldW, 14)
     $subjectField = New-SoftField -Kind Text -Icon $iconEdit -Width $fieldW -Height 40
     $subjectHost = $subjectField.Shell
@@ -1088,7 +1329,7 @@ function New-SupportPanel {
     $bodyLabel = New-Object System.Windows.Forms.Label
     $bodyLabel.Text = 'Описание'
     $bodyLabel.ForeColor = $labelColor
-    $bodyLabel.BackColor = [System.Drawing.Color]::White
+    $bodyLabel.BackColor = $headerColor
     $bodyLabel.SetBounds(16, 258, $fieldW, 14)
     $bodyField = New-SoftField -Kind Note -Icon $iconMessage -Width $fieldW -Height 104
     $bodyHost = $bodyField.Shell
@@ -1097,7 +1338,7 @@ function New-SupportPanel {
     $ticketStatus = New-Object System.Windows.Forms.Label
     $ticketStatus.Text = ''
     $ticketStatus.ForeColor = $muted
-    $ticketStatus.BackColor = [System.Drawing.Color]::White
+    $ticketStatus.BackColor = $headerColor
     $ticketStatus.SetBounds(16, 384, $fieldW, 16)
     $send = New-FlatButton -Text 'Отправить заявку' -Location (New-Object System.Drawing.Point(16, 402)) -Size (New-Object System.Drawing.Size($fieldW, 44))
     $portalLink = New-Object System.Windows.Forms.LinkLabel
@@ -1105,7 +1346,7 @@ function New-SupportPanel {
     $portalLink.LinkColor = $accent
     $portalLink.ActiveLinkColor = $accent
     $portalLink.LinkBehavior = 'HoverUnderline'
-    $portalLink.BackColor = [System.Drawing.Color]::White
+    $portalLink.BackColor = $headerColor
     $portalLink.SetBounds(16, 450, 240, 16)
     $portalLink.Visible = $false
     $portalLink.Add_LinkClicked({
@@ -1140,7 +1381,7 @@ function New-SupportPanel {
     $panel.Controls.Add($sheet)
     $headerRule = New-Object System.Windows.Forms.Panel
     $headerRule.SetBounds(16, ($headerH - 1), ($panelW - 32), 1)
-    $headerRule.BackColor = [System.Drawing.Color]::FromArgb(244, 244, 245)
+    $headerRule.BackColor = $ruleColor
     $panel.Controls.Add($headerRule)
     $panel.Add_KeyDown({
         if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { Hide-SupportPanel }
@@ -1152,21 +1393,31 @@ function New-SupportPanel {
     })
 
     $script:WidgetUi = @{
+        Header = $header
+        Sheet = $sheet
+        TitleLabel = $title
+        CloseButton = $close
+        HeaderRule = $headerRule
         Status = $status
         Identity = $identity
         LoginLabel = $loginLabel
         LoginHost = $loginHost
+        LoginField = $loginField
         LoginBox = $loginBox
         ComputerLabel = $computerLabel
         ComputerHost = $computerHost
+        ComputerField = $computerField
         ComputerBox = $computerBox
         ProjectLabel = $projectLabel
         ProjectHost = $projectHost
+        ProjectField = $projectField
         ProjectBox = $project
         CategoryLabel = $categoryLabel
         CategoryHost = $categoryHost
+        CategoryField = $categoryField
         SubjectLabel = $subjectLabel
         SubjectHost = $subjectHost
+        SubjectField = $subjectField
         BodyLabel = $bodyLabel
         BodyHost = $bodyHost
         BodyField = $bodyField
@@ -1197,9 +1448,9 @@ function Set-TicketStatusMessage {
     if ($null -ne $Text) { $clean = ($Text.Trim() -replace '\s+', ' ') }
     if ($clean.Length -gt 140) { $clean = $clean.Substring(0, 140) }
     if ($IsError) {
-        $script:WidgetUi.TicketStatus.ForeColor = [System.Drawing.Color]::FromArgb(146, 43, 33)
+        $script:WidgetUi.TicketStatus.ForeColor = Get-ThemeColor StatusError
     } else {
-        $script:WidgetUi.TicketStatus.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
+        $script:WidgetUi.TicketStatus.ForeColor = Get-ThemeColor Muted
     }
     $script:WidgetUi.TicketStatus.Text = $clean
     try { $script:WidgetUi.TicketStatus.Refresh() } catch { }
@@ -1320,7 +1571,7 @@ function Submit-SupportTicket {
         Write-Log ("Заявка отправлена, ответ сервис-деска: {0}, проект: {1}, категория: {2}, пользователь: {3}, компьютер: {4}." -f $code, $payload.projectId, $payload.category, $payload.user, $payload.computer)
         $ui.SubjectBox.Text = ''
         $ui.BodyBox.Text = ''
-        $ui.TicketStatus.ForeColor = [System.Drawing.Color]::FromArgb(25, 111, 61)
+        $ui.TicketStatus.ForeColor = Get-ThemeColor StatusOk
         $ui.TicketStatus.Text = 'Заявка отправлена.'
     } catch {
         Write-Log ("Заявку отправить не удалось: {0}" -f $_.Exception.Message) 'WARN'
@@ -1352,7 +1603,7 @@ function Submit-JiraRequest {
         Write-Log ("Заявка Jira создана: {0}, проект: {1}, тип: {2}, пользователь: {3}, компьютер: {4}." -f $key, $desk.ProjectKey, $kind.Name, $Login, $Computer)
         $ui.SubjectBox.Text = ''
         $ui.BodyBox.Text = ''
-        $ui.TicketStatus.ForeColor = [System.Drawing.Color]::FromArgb(25, 111, 61)
+        $ui.TicketStatus.ForeColor = Get-ThemeColor StatusOk
         if ([string]::IsNullOrWhiteSpace($key)) { $ui.TicketStatus.Text = 'Заявка создана в Jira.' }
         else { $ui.TicketStatus.Text = ('Заявка {0} создана.' -f $key) }
     } catch {
@@ -1367,6 +1618,8 @@ function Submit-JiraRequest {
 function New-DesktopWidget {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
+    Enable-AppThemeMode
+    Sync-WidgetTheme -Force
     if (-not (Initialize-DesktopHost)) { $script:WidgetHost = [IntPtr]::Zero }
     $script:TabFont = New-Object System.Drawing.Font('Segoe UI', 9)
     $script:TabFontBold = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
@@ -1391,11 +1644,14 @@ function New-DesktopWidget {
     Apply-SupportPageVisual -Page Ticket
     Update-WidgetChrome
     Set-SupportBounds
-    $launcher.Show()
-    if ('DesktopHost' -as [type]) {
+    Ensure-TrayIcon
+    Register-ThemeChanges
+    Set-LauncherChrome
+    if ('DesktopHost' -as [type] -and $launcher.IsHandleCreated) {
         try { [DesktopHost]::PrepareLauncher($launcher.Handle) } catch { }
     }
-    Write-Log 'Кнопка поддержки показана в углу экрана.'
+    if (Test-ShowLauncher) { Write-Log 'Кнопка поддержки показана в углу экрана.' }
+    else { Write-Log 'Кнопка поддержки скрыта. Программа остаётся у часов.' }
 }
 
 function Ensure-DesktopWidget {
@@ -1416,17 +1672,35 @@ function Ensure-TrayIcon {
     $openItem = $menu.Items.Add('Открыть')
     $ticketItem = $menu.Items.Add('Заявка')
     $newsItem = $menu.Items.Add('Новости')
+    [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+    $buttonItem = New-Object System.Windows.Forms.ToolStripMenuItem
+    $buttonItem.Text = 'Кнопка на экране'
+    $buttonItem.CheckOnClick = $true
+    $buttonItem.Checked = Test-ShowLauncher
+    $script:LauncherMenuItem = $buttonItem
+    [void]$menu.Items.Add($buttonItem)
     $exitItem = $menu.Items.Add('Выход')
     $openItem.Add_Click({ Show-SupportPanel -Page $script:WidgetPage })
     $ticketItem.Add_Click({ Show-SupportPanel -Page Ticket })
     $newsItem.Add_Click({ Show-SupportPanel -Page News })
+    $buttonItem.Add_Click({
+        $show = [bool]$script:LauncherMenuItem.Checked
+        if ($script:State) {
+            $script:State.ShowLauncher = $show
+            Save-StateTable $script:State
+        }
+        Set-LauncherChrome
+    })
     $exitItem.Add_Click({ Stop-DesktopWidgetApp })
     $icon.ContextMenuStrip = $menu
+    $script:TrayMenu = $menu
+    Apply-TrayMenuPalette
     $icon.Add_DoubleClick({ Show-SupportPanel -Page Ticket })
     $script:TrayIcon = $icon
 }
 
 function Stop-DesktopWidgetApp {
+    Unregister-ThemeChanges
     $script:AllowExit = $true
     if ($script:NewsPopup -and -not $script:NewsPopup.IsDisposed) { $script:NewsPopup.Close() }
     if ($script:PanelForm -and -not $script:PanelForm.IsDisposed) { $script:PanelForm.Close() }
@@ -1513,24 +1787,27 @@ function Ensure-NewsPopup {
     if ($script:NewsPopup -and -not $script:NewsPopup.IsDisposed) { return }
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
-    $ink = [System.Drawing.Color]::FromArgb(24, 24, 27)
-    $muted = [System.Drawing.Color]::FromArgb(113, 113, 122)
+    $ink = Get-ThemeColor Ink
+    $muted = Get-ThemeColor Muted
+    $canvas = Get-ThemeColor Canvas
+    $hover = Get-ThemeColor Hover
+    $ruleColor = Get-ThemeColor Rule
     $form = New-Object System.Windows.Forms.Form
     $form.FormBorderStyle = 'None'
     $form.ShowInTaskbar = $false
     $form.StartPosition = 'Manual'
     $form.TopMost = $true
-    $form.BackColor = [System.Drawing.Color]::White
+    $form.BackColor = $canvas
     $form.ClientSize = New-Object System.Drawing.Size(280, 120)
     $form.Font = $script:TabFont
     $form.Text = 'Новости'
     $header = New-Object System.Windows.Forms.Panel
     $header.SetBounds(0, 0, 280, 36)
-    $header.BackColor = [System.Drawing.Color]::White
+    $header.BackColor = $canvas
     $title = New-Object System.Windows.Forms.Label
     $title.Text = 'Новости'
     $title.ForeColor = $ink
-    $title.BackColor = [System.Drawing.Color]::White
+    $title.BackColor = $canvas
     $title.Font = $script:TabFontBold
     $title.AutoEllipsis = $true
     $title.SetBounds(12, 8, 220, 20)
@@ -1540,8 +1817,8 @@ function Ensure-NewsPopup {
     $close.SetBounds(244, 4, 28, 26)
     $close.FlatStyle = 'Flat'
     $close.FlatAppearance.BorderSize = 0
-    $close.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(244, 244, 245)
-    $close.BackColor = [System.Drawing.Color]::White
+    $close.FlatAppearance.MouseOverBackColor = $hover
+    $close.BackColor = $canvas
     $close.ForeColor = $muted
     $close.Font = $script:TitleFont
     $close.Cursor = [System.Windows.Forms.Cursors]::Hand
@@ -1549,13 +1826,13 @@ function Ensure-NewsPopup {
     $close.Add_Click({ Hide-NewsPopup })
     $headerRule = New-Object System.Windows.Forms.Panel
     $headerRule.SetBounds(12, 35, 256, 1)
-    $headerRule.BackColor = [System.Drawing.Color]::FromArgb(244, 244, 245)
+    $headerRule.BackColor = $ruleColor
     $header.Controls.Add($title)
     $header.Controls.Add($close)
     $header.Controls.Add($headerRule)
     $body = New-Object System.Windows.Forms.Panel
     $body.SetBounds(0, 36, 280, 84)
-    $body.BackColor = [System.Drawing.Color]::White
+    $body.BackColor = $canvas
     $form.Controls.Add($header)
     $form.Controls.Add($body)
     $form.Add_FormClosing({
@@ -1568,13 +1845,17 @@ function Ensure-NewsPopup {
     $script:NewsPopup = $form
     $script:NewsPopupBody = $body
     $script:NewsPopupTitle = $title
-    if ($script:WidgetForm -and -not $script:WidgetForm.IsDisposed) { $form.Owner = $script:WidgetForm }
+    $script:NewsPopupHeader = $header
+    $script:NewsPopupClose = $close
+    $script:NewsPopupRule = $headerRule
+    if ((Test-ShowLauncher) -and $script:WidgetForm -and -not $script:WidgetForm.IsDisposed) { $form.Owner = $script:WidgetForm }
 }
 
 function Show-NewsPopup {
     param($Notices)
     $items = @($Notices | Where-Object { $null -ne $_ })
     if ($items.Count -eq 0) { return }
+    $script:PopupNotices = $items
     Ensure-DesktopWidget
     Ensure-NewsPopup
     $heading = 'Новости'
@@ -1588,19 +1869,19 @@ function Show-NewsPopup {
     foreach ($item in $items) {
         $row = New-Object System.Windows.Forms.Panel
         $row.SetBounds(8, $y, 264, 44)
-        $row.BackColor = [System.Drawing.Color]::White
+        $row.BackColor = Get-ThemeColor Canvas
         $row.Cursor = [System.Windows.Forms.Cursors]::Hand
         $row.Add_Click($open)
         $bar = New-Object System.Windows.Forms.Panel
         $bar.SetBounds(0, 4, 4, 36)
-        $bar.BackColor = [System.Drawing.Color]::FromArgb(24, 24, 27)
-        if ([string]$item.Kind -eq 'maintenance') { $bar.BackColor = [System.Drawing.Color]::FromArgb(180, 83, 9) }
+        $bar.BackColor = Get-ThemeColor Ink
+        if ([string]$item.Kind -eq 'maintenance') { $bar.BackColor = Get-ThemeColor Maintenance }
         $bar.Add_Click($open)
         $caption = New-Object System.Windows.Forms.Label
         $caption.Text = [string]$item.Title
         $caption.Font = $script:RowTitleFont
-        $caption.ForeColor = [System.Drawing.Color]::FromArgb(24, 24, 27)
-        $caption.BackColor = [System.Drawing.Color]::White
+        $caption.ForeColor = Get-ThemeColor Ink
+        $caption.BackColor = Get-ThemeColor Canvas
         $caption.AutoEllipsis = $true
         $caption.SetBounds(12, 2, 248, 18)
         $caption.Cursor = [System.Windows.Forms.Cursors]::Hand
@@ -1608,8 +1889,8 @@ function Show-NewsPopup {
         $detail = New-Object System.Windows.Forms.Label
         $detail.Text = Get-NoticeSnippet ([string]$item.Body)
         $detail.Font = $script:RowBodyFont
-        $detail.ForeColor = [System.Drawing.Color]::FromArgb(75, 85, 99)
-        $detail.BackColor = [System.Drawing.Color]::White
+        $detail.ForeColor = Get-ThemeColor Detail
+        $detail.BackColor = Get-ThemeColor Canvas
         $detail.AutoEllipsis = $true
         $detail.SetBounds(12, 22, 248, 16)
         $detail.Cursor = [System.Windows.Forms.Cursors]::Hand

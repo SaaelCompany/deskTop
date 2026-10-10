@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.5'
+$script:Version = '1.2.6'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -507,6 +507,7 @@ function Read-StateTable {
         LastReason = ''
         LastExplorerRestartAt = ''
         SeenNoticeIds = @()
+        ShowLauncher = $true
         UpdatedAt = ''
     }
     if (-not (Test-Path -LiteralPath $script:Cfg.StatePath)) { return $table }
@@ -528,6 +529,7 @@ function Read-StateTable {
     $table.LastReason = [string]$table.LastReason
     $table.LastExplorerRestartAt = [string]$table.LastExplorerRestartAt
     $table.SeenNoticeIds = @(ConvertTo-IdList $table.SeenNoticeIds)
+    $table.ShowLauncher = Resolve-ShowLauncher $table.ShowLauncher
     return $table
 }
 

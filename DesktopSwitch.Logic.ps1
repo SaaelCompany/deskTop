@@ -23,6 +23,71 @@ function ConvertTo-Bool {
     return $Default
 }
 
+function Resolve-AppThemeLight {
+    param($AppsUseLightTheme)
+    if ($null -eq $AppsUseLightTheme) { return $true }
+    $text = ([string]$AppsUseLightTheme).Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) { return $true }
+    $number = 0
+    if (-not [int]::TryParse($text, [ref]$number)) { return $true }
+    return $number -ne 0
+}
+
+function Resolve-ShowLauncher {
+    param($Stored)
+    return ConvertTo-Bool $Stored $true
+}
+
+function Get-WidgetPalette {
+    param([bool]$Light)
+    if ($Light) {
+        return @{
+            Canvas = @(255, 255, 255)
+            Ink = @(24, 24, 27)
+            Muted = @(113, 113, 122)
+            Label = @(71, 85, 105)
+            FieldBorder = @(226, 232, 240)
+            FieldFill = @(255, 255, 255)
+            FieldReadOnly = @(248, 250, 252)
+            Icon = @(148, 163, 184)
+            Hover = @(244, 244, 245)
+            Rule = @(244, 244, 245)
+            Accent = @(47, 107, 255)
+            AccentHover = @(37, 90, 230)
+            StatusMuted = @(113, 113, 122)
+            StatusLocal = @(185, 28, 28)
+            StatusOnline = @(22, 101, 52)
+            StatusError = @(146, 43, 33)
+            StatusOk = @(25, 111, 61)
+            Maintenance = @(180, 83, 9)
+            Empty = @(31, 41, 51)
+            Detail = @(75, 85, 99)
+        }
+    }
+    return @{
+        Canvas = @(32, 32, 36)
+        Ink = @(244, 244, 245)
+        Muted = @(161, 161, 170)
+        Label = @(203, 213, 225)
+        FieldBorder = @(63, 63, 70)
+        FieldFill = @(39, 39, 42)
+        FieldReadOnly = @(28, 28, 32)
+        Icon = @(148, 163, 184)
+        Hover = @(48, 48, 54)
+        Rule = @(63, 63, 70)
+        Accent = @(47, 107, 255)
+        AccentHover = @(37, 90, 230)
+        StatusMuted = @(161, 161, 170)
+        StatusLocal = @(248, 113, 113)
+        StatusOnline = @(74, 222, 128)
+        StatusError = @(252, 165, 165)
+        StatusOk = @(134, 239, 172)
+        Maintenance = @(251, 191, 36)
+        Empty = @(244, 244, 245)
+        Detail = @(161, 161, 170)
+    }
+}
+
 function ConvertTo-Int {
     param($Value, [int]$Default)
     if ($null -eq $Value) { return $Default }
