@@ -40,6 +40,10 @@ $script:ThemeHooked = $false
 $script:ThemeHandler = $null
 $script:ApplyingTheme = $false
 $script:PopupNotices = @()
+$script:ListPopup = $null
+$script:ListPopupClosing = $false
+$script:ListPopupReady = $false
+$script:SoftListSource = $null
 
 $script:DesktopHostSource = @'
 using System;
@@ -265,8 +269,30 @@ function Update-SoftFieldTheme {
     $Field.Fill.BackColor = $fill
     $Field.Icon.BackColor = $fill
     $Field.Icon.ForeColor = $icon
-    $Field.Editor.BackColor = $fill
-    $Field.Editor.ForeColor = $ink
+    if ($Field.Editor -is [System.Windows.Forms.Control]) {
+        $Field.Editor.BackColor = $fill
+        $Field.Editor.ForeColor = $ink
+    }
+    $valueLabel = $null
+    $chevron = $null
+    if ($Field -is [System.Collections.IDictionary]) {
+        if ($Field.ContainsKey('ValueLabel')) { $valueLabel = $Field['ValueLabel'] }
+        if ($Field.ContainsKey('Chevron')) { $chevron = $Field['Chevron'] }
+    }
+    if ($null -ne $valueLabel) {
+        $valueLabel.BackColor = $fill
+        $valueLabel.ForeColor = $ink
+    }
+    if ($null -ne $chevron) {
+        $chevron.BackColor = $fill
+        $chevron.ForeColor = $icon
+    }
+    foreach ($child in @($Field.Fill.Controls)) {
+        if ($child.Tag -eq 'cue') {
+            $child.BackColor = $fill
+            $child.ForeColor = $icon
+        }
+    }
 }
 
 function Apply-TrayMenuPalette {
@@ -578,6 +604,165 @@ function Update-SoftFieldSize {
     }
 }
 
+function Initialize-SoftListType {
+    if ('DeskSoftList' -as [type]) { return }
+    $source = @'
+using System;
+
+public sealed class DeskSoftItems {
+    object[] data = new object[0];
+    public event EventHandler Changed;
+    public int Count { get { return data.Length; } }
+    public object this[int index] { get { return data[index]; } }
+    public void Clear() {
+        data = new object[0];
+        if (Changed != null) Changed(this, EventArgs.Empty);
+    }
+    public void Add(object item) {
+        object[] next = new object[data.Length + 1];
+        for (int i = 0; i < data.Length; i++) next[i] = data[i];
+        next[data.Length] = item;
+        data = next;
+        if (Changed != null) Changed(this, EventArgs.Empty);
+    }
+}
+
+public sealed class DeskSoftList {
+    public DeskSoftItems Items;
+    int index = -1;
+    public bool Enabled;
+    public event EventHandler SelectedIndexChanged;
+    public event EventHandler ItemsChanged;
+    public DeskSoftList() {
+        Enabled = true;
+        Items = new DeskSoftItems();
+        Items.Changed += OnItemsChanged;
+    }
+    void OnItemsChanged(object sender, EventArgs e) {
+        if (Items.Count == 0) {
+            if (index != -1) {
+                index = -1;
+                if (SelectedIndexChanged != null) SelectedIndexChanged(this, EventArgs.Empty);
+            }
+        } else if (index >= Items.Count) {
+            index = Items.Count - 1;
+            if (SelectedIndexChanged != null) SelectedIndexChanged(this, EventArgs.Empty);
+        }
+        if (ItemsChanged != null) ItemsChanged(this, EventArgs.Empty);
+    }
+    public int SelectedIndex {
+        get { return index; }
+        set {
+            if (value < -1) value = -1;
+            if (Items.Count == 0) value = -1;
+            else if (value >= Items.Count) value = Items.Count - 1;
+            if (value == index) {
+                if (ItemsChanged != null) ItemsChanged(this, EventArgs.Empty);
+                return;
+            }
+            index = value;
+            if (SelectedIndexChanged != null) SelectedIndexChanged(this, EventArgs.Empty);
+            if (ItemsChanged != null) ItemsChanged(this, EventArgs.Empty);
+        }
+    }
+    public object SelectedItem {
+        get {
+            if (index < 0 || index >= Items.Count) return null;
+            return Items[index];
+        }
+    }
+}
+'@
+    Add-Type -TypeDefinition $source -ErrorAction Stop
+}
+
+function Close-SoftListPopup {
+    if ($script:ListPopupClosing) { return }
+    $popup = $script:ListPopup
+    if ($null -eq $popup -or $popup.IsDisposed) {
+        $script:ListPopup = $null
+        $script:SoftListSource = $null
+        return
+    }
+    $script:ListPopupClosing = $true
+    $script:ListPopupReady = $false
+    try { $popup.Close() } catch { }
+    finally {
+        $script:ListPopupClosing = $false
+        $script:ListPopup = $null
+        $script:SoftListSource = $null
+    }
+}
+
+function Show-SoftListPopup {
+    param($List, $Anchor)
+    if ($null -eq $List -or -not $List.Enabled) { return }
+    if ($List.Items.Count -eq 0) { return }
+    Close-SoftListPopup
+    $rowH = 36
+    $visible = $List.Items.Count
+    if ($visible -gt 6) { $visible = 6 }
+    $popupW = $Anchor.Width
+    $popupH = $visible * $rowH
+    $form = New-Object System.Windows.Forms.Form
+    $form.FormBorderStyle = 'None'
+    $form.ShowInTaskbar = $false
+    $form.StartPosition = 'Manual'
+    $form.TopMost = $true
+    $form.BackColor = Get-ThemeColor FieldFill
+    $form.ClientSize = New-Object System.Drawing.Size($popupW, $popupH)
+    $form.Region = New-Object System.Drawing.Region((New-RoundedPath -Width $popupW -Height $popupH -Radius 12))
+    $origin = $Anchor.PointToScreen((New-Object System.Drawing.Point(0, ($Anchor.Height + 4))))
+    $screen = [System.Windows.Forms.Screen]::FromControl($Anchor).WorkingArea
+    if (($origin.Y + $popupH) -gt $screen.Bottom) { $origin.Y = $origin.Y - $Anchor.Height - 8 - $popupH }
+    $form.Location = $origin
+    $scroller = New-Object System.Windows.Forms.Panel
+    $scroller.Dock = 'Fill'
+    $scroller.AutoScroll = ($List.Items.Count -gt 6)
+    $scroller.BackColor = Get-ThemeColor FieldFill
+    $script:SoftListSource = $List
+    for ($i = 0; $i -lt $List.Items.Count; $i++) {
+        $row = New-Object System.Windows.Forms.Label
+        $row.Text = [string]$List.Items[$i]
+        $row.Tag = $i
+        $row.Font = $script:FieldFont
+        $row.AutoEllipsis = $true
+        $row.TextAlign = 'MiddleLeft'
+        $row.Cursor = [System.Windows.Forms.Cursors]::Hand
+        $rowWidth = $popupW
+        if ($List.Items.Count -gt 6) { $rowWidth = $popupW - 18 }
+        $row.SetBounds(0, ($i * $rowH), $rowWidth, $rowH)
+        $row.Padding = New-Object System.Windows.Forms.Padding(14, 0, 12, 0)
+        if ($i -eq $List.SelectedIndex) {
+            $row.BackColor = Get-ThemeColor Accent
+            $row.ForeColor = [System.Drawing.Color]::White
+        } else {
+            $row.BackColor = Get-ThemeColor FieldFill
+            $row.ForeColor = Get-ThemeColor Ink
+        }
+        $row.Add_Click({
+            $source = $script:SoftListSource
+            if ($null -ne $source) { $source.SelectedIndex = [int]$this.Tag }
+            Close-SoftListPopup
+        })
+        $scroller.Controls.Add($row)
+    }
+    $form.Controls.Add($scroller)
+    $form.Add_Shown({ $script:ListPopupReady = $true })
+    $form.Add_Deactivate({
+        if (-not $script:ListPopupReady) { return }
+        Close-SoftListPopup
+    })
+    $form.Add_KeyDown({
+        if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { Close-SoftListPopup }
+    })
+    $form.KeyPreview = $true
+    if ($script:PanelForm -and -not $script:PanelForm.IsDisposed) { $form.Owner = $script:PanelForm }
+    $script:ListPopupReady = $false
+    $script:ListPopup = $form
+    $form.Show()
+}
+
 function New-SoftField {
     param(
         [string]$Kind,
@@ -607,39 +792,48 @@ function New-SoftField {
     $iconLabel.TextAlign = 'MiddleCenter'
     $iconLabel.SetBounds(2, 0, 32, ($Height - 2))
     if ($Kind -eq 'Combo') {
-        $editor = New-Object System.Windows.Forms.ComboBox
-        $editor.DropDownStyle = 'DropDownList'
-        $editor.FlatStyle = 'Flat'
-        $editor.Font = $script:FieldFont
-        $editor.BackColor = $fillColor
-        $editor.ForeColor = $ink
-        $editor.SetBounds(34, 7, ($Width - 48), 24)
-        $editor.DrawMode = 'OwnerDrawFixed'
-        $editor.ItemHeight = 22
-        $combo = $editor
-        $editor.Add_DrawItem({
-            if ($_.Index -lt 0) { return }
-            $selected = ($_.State -band [System.Windows.Forms.DrawItemState]::Selected) -ne 0
-            $editing = ($_.State -band [System.Windows.Forms.DrawItemState]::ComboBoxEdit) -ne 0
-            $bg = Get-ThemeColor FieldFill
-            $fg = Get-ThemeColor Ink
-            if ($selected -and -not $editing) {
-                $bg = Get-ThemeColor Accent
-                $fg = [System.Drawing.Color]::White
+        Initialize-SoftListType
+        $editor = New-Object DeskSoftList
+        $valueLabel = New-Object System.Windows.Forms.Label
+        $valueLabel.Font = $script:FieldFont
+        $valueLabel.ForeColor = $ink
+        $valueLabel.BackColor = $fillColor
+        $valueLabel.AutoEllipsis = $true
+        $valueLabel.TextAlign = 'MiddleLeft'
+        $valueLabel.Cursor = [System.Windows.Forms.Cursors]::Hand
+        $valueLabel.SetBounds(36, 2, ($Width - 78), ($Height - 6))
+        $chevron = New-Object System.Windows.Forms.Label
+        $chevron.Text = [string][char]0x2304
+        $chevron.Font = $script:FieldFont
+        $chevron.ForeColor = $iconColor
+        $chevron.BackColor = $fillColor
+        $chevron.TextAlign = 'MiddleCenter'
+        $chevron.Cursor = [System.Windows.Forms.Cursors]::Hand
+        $chevron.SetBounds(($Width - 36), 2, 28, ($Height - 6))
+        $syncCaption = {
+            $caption = ''
+            if ($editor.SelectedIndex -ge 0 -and $editor.SelectedIndex -lt $editor.Items.Count) {
+                $caption = [string]$editor.Items[$editor.SelectedIndex]
             }
-            $brush = New-Object System.Drawing.SolidBrush $bg
-            $_.Graphics.FillRectangle($brush, $_.Bounds)
-            $brush.Dispose()
-            $textBrush = New-Object System.Drawing.SolidBrush $fg
-            $text = ''
-            if ($_.Index -lt $combo.Items.Count) { $text = [string]$combo.Items[$_.Index] }
-            $_.Graphics.DrawString($text, $combo.Font, $textBrush, ($_.Bounds.X + 4), ($_.Bounds.Y + 3))
-            $textBrush.Dispose()
-        }.GetNewClosure())
+            $valueLabel.Text = $caption
+        }.GetNewClosure()
+        $editor.Add_SelectedIndexChanged($syncCaption)
+        $editor.Add_ItemsChanged($syncCaption)
+        $openList = { Show-SoftListPopup -List $editor -Anchor $shell }.GetNewClosure()
+        $fill.Add_Click($openList)
+        $iconLabel.Add_Click($openList)
+        $shell.Add_Click($openList)
+        $valueLabel.Add_Click($openList)
+        $chevron.Add_Click($openList)
+        $fill.Controls.Add($iconLabel)
+        $fill.Controls.Add($valueLabel)
+        $fill.Controls.Add($chevron)
+        $shell.Controls.Add($fill)
+        return @{ Shell = $shell; Editor = $editor; Fill = $fill; Icon = $iconLabel; ValueLabel = $valueLabel; Chevron = $chevron }
     } elseif ($Kind -eq 'Note') {
         $editor = New-Object System.Windows.Forms.TextBox
         $editor.Multiline = $true
-        $editor.ScrollBars = 'Vertical'
+        $editor.ScrollBars = 'None'
         $editor.BorderStyle = 'None'
         $editor.Font = $script:FieldFont
         $editor.BackColor = $fillColor
@@ -667,34 +861,33 @@ function New-SoftField {
     $fill.Controls.Add($iconLabel)
     $fill.Controls.Add($editor)
     $shell.Controls.Add($fill)
-    return @{ Shell = $shell; Editor = $editor; Fill = $fill; Icon = $iconLabel }
+    return @{ Shell = $shell; Editor = $editor; Fill = $fill; Icon = $iconLabel; ValueLabel = $null; Chevron = $null }
 }
 
 function Set-FieldCue {
     param($Box, [string]$Cue)
     if ($null -eq $Box -or [string]::IsNullOrWhiteSpace($Cue)) { return }
-    if (-not ('FieldCue' -as [type])) {
-        try {
-            $cueSource = @'
-using System;
-using System.Runtime.InteropServices;
-public static class FieldCue {
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
-}
-'@
-            Add-Type -TypeDefinition $cueSource -ErrorAction Stop
-        } catch {
-            return
-        }
-    }
-    $target = $Box
-    $cueText = $Cue
-    $apply = {
-        try { [FieldCue]::SendMessage($target.Handle, 0x1501, [IntPtr]1, $cueText) | Out-Null } catch { }
-    }.GetNewClosure()
-    if ($Box.IsHandleCreated) { & $apply }
-    else { $Box.Add_HandleCreated($apply) }
+    $hostPanel = $Box.Parent
+    if ($null -eq $hostPanel) { return }
+    $cueLabel = New-Object System.Windows.Forms.Label
+    $cueLabel.Text = $Cue
+    $cueLabel.Tag = 'cue'
+    $cueLabel.Font = $script:FieldFont
+    $cueLabel.ForeColor = Get-ThemeColor Icon
+    $cueLabel.BackColor = $Box.BackColor
+    $cueLabel.AutoEllipsis = $true
+    $cueLabel.Cursor = [System.Windows.Forms.Cursors]::IBeam
+    $cueHeight = 22
+    if (-not $Box.Multiline) { $cueHeight = $Box.Height }
+    $cueLabel.SetBounds($Box.Left, $Box.Top, $Box.Width, $cueHeight)
+    $cueLabel.Add_Click({ try { $Box.Focus() } catch { } }.GetNewClosure())
+    $Box.Add_GotFocus({ $cueLabel.Visible = $false }.GetNewClosure())
+    $Box.Add_LostFocus({ $cueLabel.Visible = [string]::IsNullOrEmpty($Box.Text) }.GetNewClosure())
+    $Box.Add_TextChanged({
+        $cueLabel.Visible = [string]::IsNullOrEmpty($Box.Text) -and -not $Box.Focused
+    }.GetNewClosure())
+    $hostPanel.Controls.Add($cueLabel)
+    $cueLabel.BringToFront()
 }
 
 function Clear-ChildControls {
