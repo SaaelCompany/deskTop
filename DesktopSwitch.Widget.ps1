@@ -582,7 +582,7 @@ function New-SoftField {
     param(
         [string]$Kind,
         [string]$Icon,
-        [bool]$ReadOnly = $false,
+        [switch]$ReadOnly,
         [int]$Width = 328,
         [int]$Height = 40
     )
