@@ -28,6 +28,10 @@ $script:LauncherClickAt = [datetime]::MinValue
 $script:WidgetContext = $null
 $script:DesktopMode = ''
 $script:DesktopVerdict = ''
+$script:JiraDesks = @()
+$script:JiraRequestTypes = @()
+$script:JiraLoaded = $false
+$script:JiraLoading = $false
 
 $script:DesktopHostSource = @'
 using System;
@@ -418,17 +422,74 @@ function Update-NewsRows {
     $list.AutoScrollMinSize = New-Object System.Drawing.Size(0, $y)
 }
 
+function Test-JiraTicketMode {
+    if ($null -eq $script:Cfg) { return $false }
+    return -not [string]::IsNullOrWhiteSpace([string]$script:Cfg.JiraBaseUrl)
+}
+
+function Get-WidgetPortalUrl {
+    $explicit = ''
+    $jira = ''
+    if ($script:Cfg) {
+        $explicit = [string]$script:Cfg.ServiceDeskUrl
+        $jira = [string]$script:Cfg.JiraBaseUrl
+    }
+    return Get-JiraPortalUrl -BaseUrl $jira -ExplicitUrl $explicit
+}
+
+function Set-TicketFieldLayout {
+    param([bool]$JiraMode)
+    if ($null -eq $script:WidgetUi) { return }
+    $ui = $script:WidgetUi
+    $ui.ProjectLabel.Visible = $JiraMode
+    $ui.ProjectBox.Visible = $JiraMode
+    if ($JiraMode) {
+        $ui.CategoryLabel.Text = 'Тип запроса'
+        $ui.ProjectLabel.SetBounds(10, 44, 280, 14)
+        $ui.ProjectBox.SetBounds(10, 58, 280, 22)
+        $ui.CategoryLabel.SetBounds(10, 84, 280, 14)
+        $ui.CategoryBox.SetBounds(10, 98, 280, 22)
+        $ui.SubjectLabel.SetBounds(10, 124, 280, 14)
+        $ui.SubjectBox.SetBounds(10, 138, 280, 22)
+        $ui.BodyLabel.SetBounds(10, 164, 280, 14)
+        $ui.BodyBox.SetBounds(10, 178, 280, 28)
+        $ui.TicketStatus.SetBounds(10, 208, 280, 20)
+        $ui.SendButton.SetBounds(10, 230, 280, 30)
+        $ui.PortalLink.SetBounds(10, 264, 200, 16)
+    } else {
+        $ui.CategoryLabel.Text = 'Категория'
+        $ui.CategoryLabel.SetBounds(10, 44, 280, 14)
+        $ui.CategoryBox.SetBounds(10, 58, 280, 22)
+        $ui.SubjectLabel.SetBounds(10, 84, 280, 14)
+        $ui.SubjectBox.SetBounds(10, 98, 280, 22)
+        $ui.BodyLabel.SetBounds(10, 124, 280, 14)
+        $ui.BodyBox.SetBounds(10, 138, 280, 64)
+        $ui.TicketStatus.SetBounds(10, 206, 280, 24)
+        $ui.SendButton.SetBounds(10, 232, 280, 30)
+        $ui.PortalLink.SetBounds(10, 266, 200, 16)
+    }
+}
+
 function Update-TicketActions {
     if ($null -eq $script:WidgetUi) { return }
     $api = ''
-    $portal = ''
-    if ($script:Cfg) {
-        $api = [string]$script:Cfg.ServiceDeskApiUrl
-        $portal = [string]$script:Cfg.ServiceDeskUrl
-    }
+    if ($script:Cfg) { $api = [string]$script:Cfg.ServiceDeskApiUrl }
     $ui = $script:WidgetUi
+    $jira = Test-JiraTicketMode
+    $portal = Get-WidgetPortalUrl
     $hasApi = -not [string]::IsNullOrWhiteSpace($api)
     $hasPortal = -not [string]::IsNullOrWhiteSpace($portal)
+    Set-TicketFieldLayout -JiraMode $jira
+    if ($jira) {
+        $ui.PortalLink.Visible = $hasPortal
+        $ui.ProjectBox.Enabled = $true
+        $ui.CategoryBox.Enabled = $true
+        $ui.SubjectBox.Enabled = $true
+        $ui.BodyBox.Enabled = $true
+        $ui.SendButton.Text = 'Отправить'
+        $ui.SendButton.Enabled = $true
+        return
+    }
     $ui.PortalLink.Visible = $hasApi -and $hasPortal
     $ui.SubjectBox.Enabled = $hasApi
     $ui.BodyBox.Enabled = $hasApi
@@ -549,6 +610,9 @@ function Show-SupportPanel {
         try { [DesktopHost]::PreparePanel($script:PanelForm.Handle) } catch { }
     }
     if ($script:WidgetForm -and -not $script:WidgetForm.IsDisposed) { $script:WidgetForm.Invalidate() }
+    if ($script:WidgetPage -eq 'Ticket' -and $script:PanelForm -and -not $script:PanelForm.IsDisposed) {
+        $script:PanelForm.BeginInvoke([System.Action]{ Request-JiraCatalogIfTicket }) | Out-Null
+    }
 }
 
 function New-LauncherButton {
@@ -708,7 +772,12 @@ function New-SupportPanel {
     $ticketTab.ForeColor = $accent
     $ticketTab.Font = $script:TabFontBold
     $ticketTab.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $ticketTab.Add_Click({ Select-SupportPage -Page Ticket })
+    $ticketTab.Add_Click({
+        Select-SupportPage -Page Ticket
+        if ($script:PanelForm -and -not $script:PanelForm.IsDisposed) {
+            $script:PanelForm.BeginInvoke([System.Action]{ Request-JiraCatalogIfTicket }) | Out-Null
+        }
+    })
     $newsTab = New-Object System.Windows.Forms.Button
     $newsTab.Text = 'Новости'
     $newsTab.SetBounds(124, 2, 140, 30)
@@ -758,6 +827,21 @@ function New-SupportPanel {
     $computerBox.TabStop = $false
     $computerBox.BackColor = [System.Drawing.Color]::FromArgb(243, 244, 246)
     $computerBox.SetBounds(152, 18, 138, 22)
+    $projectLabel = New-Object System.Windows.Forms.Label
+    $projectLabel.Text = 'Проект'
+    $projectLabel.ForeColor = $muted
+    $projectLabel.BackColor = [System.Drawing.Color]::White
+    $projectLabel.Visible = $false
+    $projectLabel.SetBounds(10, 44, 280, 14)
+    $project = New-Object System.Windows.Forms.ComboBox
+    $project.DropDownStyle = 'DropDownList'
+    $project.Visible = $false
+    $project.SetBounds(10, 58, 280, 22)
+    $project.Add_SelectedIndexChanged({
+        if ($script:JiraLoading) { return }
+        if (-not (Test-JiraTicketMode)) { return }
+        Load-JiraRequestTypes
+    })
     $categoryLabel = New-Object System.Windows.Forms.Label
     $categoryLabel.Text = 'Категория'
     $categoryLabel.ForeColor = $muted
@@ -765,10 +849,12 @@ function New-SupportPanel {
     $categoryLabel.SetBounds(10, 44, 280, 14)
     $category = New-Object System.Windows.Forms.ComboBox
     $category.DropDownStyle = 'DropDownList'
-    [void]$category.Items.Add('Инцидент')
-    [void]$category.Items.Add('Запрос обслуживания')
-    [void]$category.Items.Add('Вопрос')
-    $category.SelectedIndex = 0
+    if (-not (Test-JiraTicketMode)) {
+        [void]$category.Items.Add('Инцидент')
+        [void]$category.Items.Add('Запрос обслуживания')
+        [void]$category.Items.Add('Вопрос')
+        $category.SelectedIndex = 0
+    }
     $category.SetBounds(10, 58, 280, 22)
     $subjectLabel = New-Object System.Windows.Forms.Label
     $subjectLabel.Text = 'Тема'
@@ -801,8 +887,7 @@ function New-SupportPanel {
     $portalLink.SetBounds(10, 266, 160, 16)
     $portalLink.Visible = $false
     $portalLink.Add_LinkClicked({
-        $portalUrl = ''
-        if ($script:Cfg) { $portalUrl = [string]$script:Cfg.ServiceDeskUrl }
+        $portalUrl = Get-WidgetPortalUrl
         if ([string]::IsNullOrWhiteSpace($portalUrl)) { return }
         $who = Get-WindowsSessionIdentity
         Start-Process (Expand-ServiceDeskUrl -Url $portalUrl -Login $who.Login -Computer $who.Computer)
@@ -812,6 +897,8 @@ function New-SupportPanel {
     $ticketPage.Controls.Add($loginBox)
     $ticketPage.Controls.Add($computerLabel)
     $ticketPage.Controls.Add($computerBox)
+    $ticketPage.Controls.Add($projectLabel)
+    $ticketPage.Controls.Add($project)
     $ticketPage.Controls.Add($categoryLabel)
     $ticketPage.Controls.Add($category)
     $ticketPage.Controls.Add($subjectLabel)
@@ -842,6 +929,11 @@ function New-SupportPanel {
         Identity = $identity
         LoginBox = $loginBox
         ComputerBox = $computerBox
+        ProjectLabel = $projectLabel
+        ProjectBox = $project
+        CategoryLabel = $categoryLabel
+        SubjectLabel = $subjectLabel
+        BodyLabel = $bodyLabel
         NewsTab = $newsTab
         TicketTab = $ticketTab
         TabLine = $tabLine
@@ -858,17 +950,113 @@ function New-SupportPanel {
     return $panel
 }
 
+function Request-JiraCatalogIfTicket {
+    if ($script:PanelOpen -and $script:WidgetPage -eq 'Ticket') { Ensure-JiraCatalog }
+}
+
+function Set-TicketStatusMessage {
+    param([string]$Text, [bool]$IsError)
+    if ($null -eq $script:WidgetUi) { return }
+    $clean = ''
+    if ($null -ne $Text) { $clean = ($Text.Trim() -replace '\s+', ' ') }
+    if ($clean.Length -gt 140) { $clean = $clean.Substring(0, 140) }
+    if ($IsError) {
+        $script:WidgetUi.TicketStatus.ForeColor = [System.Drawing.Color]::FromArgb(146, 43, 33)
+    } else {
+        $script:WidgetUi.TicketStatus.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
+    }
+    $script:WidgetUi.TicketStatus.Text = $clean
+    try { $script:WidgetUi.TicketStatus.Refresh() } catch { }
+}
+
+function Ensure-JiraCatalog {
+    if (-not (Test-JiraTicketMode)) { return }
+    if ($script:JiraLoaded -or $script:JiraLoading) { return }
+    if ($null -eq $script:WidgetUi) { return }
+    $ui = $script:WidgetUi
+    $script:JiraLoading = $true
+    $loaded = $false
+    try {
+        Set-TicketStatusMessage -Text 'Загружаю проекты Jira...' -IsError $false
+        $ui.ProjectBox.Items.Clear()
+        $ui.CategoryBox.Items.Clear()
+        $script:JiraDesks = Receive-JiraServiceDesks
+        if ($null -eq $script:JiraDesks) { $script:JiraDesks = @() }
+        $script:JiraRequestTypes = @()
+        foreach ($desk in $script:JiraDesks) {
+            if ($null -eq $desk) { continue }
+            [void]$ui.ProjectBox.Items.Add((Format-JiraDeskLabel $desk))
+        }
+        $loaded = $true
+        $script:JiraLoaded = $true
+        if ($ui.ProjectBox.Items.Count -eq 0) {
+            Set-TicketStatusMessage -Text 'В Jira нет доступных проектов helpdesk для этой учётной записи.' -IsError $true
+            return
+        }
+        $ui.ProjectBox.SelectedIndex = 0
+    } catch {
+        $script:JiraLoaded = $false
+        Write-Log ("Проекты Jira не загрузились: {0}" -f $_.Exception.Message) 'WARN'
+        Set-TicketStatusMessage -Text 'Не удалось загрузить проекты Jira.' -IsError $true
+    } finally {
+        $script:JiraLoading = $false
+    }
+    if ($loaded -and $ui.ProjectBox.Items.Count -gt 0) { Load-JiraRequestTypes }
+}
+
+function Load-JiraRequestTypes {
+    if (-not (Test-JiraTicketMode)) { return }
+    if ($null -eq $script:WidgetUi -or $script:JiraLoading) { return }
+    $ui = $script:WidgetUi
+    $index = [int]$ui.ProjectBox.SelectedIndex
+    $desks = $script:JiraDesks
+    if ($null -eq $desks) { $desks = @() }
+    if ($index -lt 0 -or $index -ge $desks.Count -or $null -eq $desks[$index]) {
+        $script:JiraLoading = $true
+        try {
+            $script:JiraRequestTypes = @()
+            $ui.CategoryBox.Items.Clear()
+        } finally {
+            $script:JiraLoading = $false
+        }
+        return
+    }
+    $desk = $desks[$index]
+    $script:JiraLoading = $true
+    try {
+        Set-TicketStatusMessage -Text 'Загружаю типы запросов...' -IsError $false
+        $script:JiraRequestTypes = Receive-JiraRequestTypes -ServiceDeskId ([string]$desk.Id)
+        if ($null -eq $script:JiraRequestTypes) { $script:JiraRequestTypes = @() }
+        $ui.CategoryBox.Items.Clear()
+        foreach ($kind in $script:JiraRequestTypes) {
+            if ($null -eq $kind) { continue }
+            $name = [string]$kind.Name
+            if ([string]::IsNullOrWhiteSpace($name)) { $name = [string]$kind.Id }
+            [void]$ui.CategoryBox.Items.Add($name)
+        }
+        if ($ui.CategoryBox.Items.Count -gt 0) {
+            $ui.CategoryBox.SelectedIndex = 0
+            Set-TicketStatusMessage -Text '' -IsError $false
+        } else {
+            Set-TicketStatusMessage -Text 'Для этого проекта нет типов запросов.' -IsError $true
+        }
+    } catch {
+        Write-Log ("Типы запросов Jira не загрузились: {0}" -f $_.Exception.Message) 'WARN'
+        Set-TicketStatusMessage -Text 'Не удалось загрузить типы запросов.' -IsError $true
+    } finally {
+        $script:JiraLoading = $false
+    }
+}
+
 function Submit-SupportTicket {
     if ($null -eq $script:WidgetUi) { return }
     $api = ''
-    $portal = ''
-    if ($script:Cfg) {
-        $api = [string]$script:Cfg.ServiceDeskApiUrl
-        $portal = [string]$script:Cfg.ServiceDeskUrl
-    }
+    if ($script:Cfg) { $api = [string]$script:Cfg.ServiceDeskApiUrl }
     $who = Get-WindowsSessionIdentity
     $ui = $script:WidgetUi
-    if ([string]::IsNullOrWhiteSpace($api)) {
+    $jira = Test-JiraTicketMode
+    $portal = Get-WidgetPortalUrl
+    if (-not $jira -and [string]::IsNullOrWhiteSpace($api)) {
         if (-not [string]::IsNullOrWhiteSpace($portal)) {
             Start-Process (Expand-ServiceDeskUrl -Url $portal -Login $who.Login -Computer $who.Computer)
         }
@@ -876,8 +1064,11 @@ function Submit-SupportTicket {
     }
     $errors = Test-TicketDraft -Subject ([string]$ui.SubjectBox.Text) -Body ([string]$ui.BodyBox.Text)
     if ($errors.Count -gt 0) {
-        $ui.TicketStatus.ForeColor = [System.Drawing.Color]::FromArgb(146, 43, 33)
-        $ui.TicketStatus.Text = [string]$errors[0]
+        Set-TicketStatusMessage -Text ([string]$errors[0]) -IsError $true
+        return
+    }
+    if ($jira) {
+        Submit-JiraRequest -Login $who.Login -Computer $who.Computer
         return
     }
     $categoryName = [string]$ui.CategoryBox.SelectedItem
@@ -892,8 +1083,43 @@ function Submit-SupportTicket {
         $ui.TicketStatus.Text = 'Заявка отправлена.'
     } catch {
         Write-Log ("Заявку отправить не удалось: {0}" -f $_.Exception.Message) 'WARN'
-        $ui.TicketStatus.ForeColor = [System.Drawing.Color]::FromArgb(146, 43, 33)
-        $ui.TicketStatus.Text = 'Сервис-деск не принял заявку. Попробуйте ещё раз или откройте портал.'
+        Set-TicketStatusMessage -Text 'Сервис-деск не принял заявку. Попробуйте ещё раз или откройте портал.' -IsError $true
+    }
+}
+
+function Submit-JiraRequest {
+    param([string]$Login, [string]$Computer)
+    $ui = $script:WidgetUi
+    $deskIndex = [int]$ui.ProjectBox.SelectedIndex
+    $typeIndex = [int]$ui.CategoryBox.SelectedIndex
+    $desks = $script:JiraDesks
+    $types = $script:JiraRequestTypes
+    if ($null -eq $desks) { $desks = @() }
+    if ($null -eq $types) { $types = @() }
+    if ($deskIndex -lt 0 -or $typeIndex -lt 0 -or $deskIndex -ge $desks.Count -or $typeIndex -ge $types.Count -or $null -eq $desks[$deskIndex] -or $null -eq $types[$typeIndex]) {
+        Set-TicketStatusMessage -Text 'Выберите проект и тип запроса.' -IsError $true
+        return
+    }
+    $desk = $desks[$deskIndex]
+    $kind = $types[$typeIndex]
+    $payload = New-JiraRequestPayload -ServiceDeskId ([string]$desk.Id) -RequestTypeId ([string]$kind.Id) -Summary ([string]$ui.SubjectBox.Text) -Description ([string]$ui.BodyBox.Text) -User $Login -Computer $Computer
+    try {
+        $json = $payload | ConvertTo-Json -Compress -Depth 6
+        $url = Get-JiraCreateRequestUrl ([string]$script:Cfg.JiraBaseUrl)
+        $result = Invoke-ServiceDeskRequest -Url $url -Method 'POST' -JsonBody $json -Jira
+        $key = Get-JiraIssueKey ([string]$result.Body)
+        Write-Log ("Заявка Jira создана: {0}, проект: {1}, тип: {2}, пользователь: {3}, компьютер: {4}." -f $key, $desk.ProjectKey, $kind.Name, $Login, $Computer)
+        $ui.SubjectBox.Text = ''
+        $ui.BodyBox.Text = ''
+        $ui.TicketStatus.ForeColor = [System.Drawing.Color]::FromArgb(25, 111, 61)
+        if ([string]::IsNullOrWhiteSpace($key)) { $ui.TicketStatus.Text = 'Заявка создана в Jira.' }
+        else { $ui.TicketStatus.Text = ('Заявка {0} создана.' -f $key) }
+    } catch {
+        Write-Log ("Заявку в Jira отправить не удалось: {0}" -f $_.Exception.Message) 'WARN'
+        $detail = [string]$_.Exception.Message
+        if ([string]::IsNullOrWhiteSpace($detail)) { $detail = 'Jira не приняла заявку.' }
+        else { $detail = 'Jira не приняла заявку. ' + $detail }
+        Set-TicketStatusMessage -Text $detail -IsError $true
     }
 }
 
@@ -1205,34 +1431,118 @@ function Show-NewsDialog {
     Show-SupportPanel -Page News
 }
 
-function Send-TicketRequest {
-    param($Payload)
-    $json = $Payload | ConvertTo-Json -Compress
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+function Invoke-ServiceDeskRequest {
+    param(
+        [string]$Url,
+        [string]$Method,
+        [string]$JsonBody,
+        [switch]$Jira
+    )
+    if ([string]::IsNullOrWhiteSpace($Url)) { throw 'Адрес запроса не задан.' }
+    $verb = $Method.Trim().ToUpperInvariant()
     $response = $null
+    $reader = $null
     try {
-        $request = [System.Net.HttpWebRequest]::Create([string]$script:Cfg.ServiceDeskApiUrl)
-        $request.Method = 'POST'
-        $request.ContentType = 'application/json; charset=utf-8'
-        $request.ContentLength = $bytes.Length
+        $request = [System.Net.HttpWebRequest]::Create($Url)
+        $request.Method = $verb
+        $request.Accept = 'application/json'
         $request.Timeout = 20000
         $request.ReadWriteTimeout = 20000
         $request.UserAgent = 'DesktopSwitch'
         $proxy = [System.Net.WebRequest]::GetSystemWebProxy()
         $proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
         $request.Proxy = $proxy
-        $request.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
-        if (-not [string]::IsNullOrWhiteSpace([string]$script:Cfg.ServiceDeskToken)) {
-            $request.Headers.Add('Authorization', 'Bearer ' + [string]$script:Cfg.ServiceDeskToken)
+        if ($Jira) { $request.Headers.Add('X-ExperimentalApi', 'opt-in') }
+        $token = ''
+        if ($script:Cfg) { $token = [string]$script:Cfg.ServiceDeskToken }
+        if (-not [string]::IsNullOrWhiteSpace($token)) {
+            $request.Headers.Add('Authorization', 'Bearer ' + $token)
+        } else {
+            $request.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
+            $request.PreAuthenticate = $true
         }
-        $stream = $request.GetRequestStream()
-        $stream.Write($bytes, 0, $bytes.Length)
-        $stream.Close()
+        if ($verb -eq 'POST') {
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$JsonBody)
+            $request.ContentType = 'application/json; charset=utf-8'
+            $request.ContentLength = $bytes.Length
+            $stream = $request.GetRequestStream()
+            $stream.Write($bytes, 0, $bytes.Length)
+            $stream.Close()
+        }
         $response = $request.GetResponse()
-        return [int]$response.StatusCode
+        $reader = New-Object System.IO.StreamReader($response.GetResponseStream(), [System.Text.Encoding]::UTF8)
+        $text = $reader.ReadToEnd()
+        return [pscustomobject]@{
+            StatusCode = [int]$response.StatusCode
+            Body = $text
+        }
+    } catch [System.Net.WebException] {
+        $detail = ''
+        $errorResponse = $_.Exception.Response
+        if ($null -ne $errorResponse) {
+            try {
+                $errorReader = New-Object System.IO.StreamReader($errorResponse.GetResponseStream(), [System.Text.Encoding]::UTF8)
+                $detail = Get-JiraErrorText ($errorReader.ReadToEnd())
+                $errorReader.Close()
+            } catch { }
+            try { $errorResponse.Close() } catch { }
+        }
+        if ([string]::IsNullOrWhiteSpace($detail)) { $detail = [string]$_.Exception.Message }
+        throw $detail
     } finally {
+        if ($null -ne $reader) { $reader.Close() }
         if ($null -ne $response) { $response.Close() }
     }
+}
+
+function Receive-JiraServiceDesks {
+    $all = New-Object System.Collections.Generic.List[object]
+    $start = 0
+    $guard = 0
+    while ($guard -lt 20) {
+        $guard++
+        $url = Get-JiraServiceDeskUrl -BaseUrl ([string]$script:Cfg.JiraBaseUrl) -Start $start -Limit 50
+        $result = Invoke-ServiceDeskRequest -Url $url -Method 'GET' -JsonBody '' -Jira
+        $parsed = $null
+        if (-not [string]::IsNullOrWhiteSpace([string]$result.Body)) { $parsed = $result.Body | ConvertFrom-Json }
+        $pageDesks = ConvertFrom-JiraServiceDesks $parsed
+        foreach ($desk in $pageDesks) {
+            if ($null -ne $desk) { $all.Add($desk) }
+        }
+        $next = Get-JiraNextStart -Page $parsed -FallbackStart $start
+        if ($next -lt 0 -or $next -le $start) { break }
+        $start = $next
+    }
+    return ,$all.ToArray()
+}
+
+function Receive-JiraRequestTypes {
+    param([string]$ServiceDeskId)
+    $all = New-Object System.Collections.Generic.List[object]
+    $start = 0
+    $guard = 0
+    while ($guard -lt 20) {
+        $guard++
+        $url = Get-JiraRequestTypeUrl -BaseUrl ([string]$script:Cfg.JiraBaseUrl) -ServiceDeskId $ServiceDeskId -Start $start -Limit 50
+        $result = Invoke-ServiceDeskRequest -Url $url -Method 'GET' -JsonBody '' -Jira
+        $parsed = $null
+        if (-not [string]::IsNullOrWhiteSpace([string]$result.Body)) { $parsed = $result.Body | ConvertFrom-Json }
+        $pageTypes = ConvertFrom-JiraRequestTypes $parsed
+        foreach ($kind in $pageTypes) {
+            if ($null -ne $kind) { $all.Add($kind) }
+        }
+        $next = Get-JiraNextStart -Page $parsed -FallbackStart $start
+        if ($next -lt 0 -or $next -le $start) { break }
+        $start = $next
+    }
+    return ,$all.ToArray()
+}
+
+function Send-TicketRequest {
+    param($Payload)
+    $json = $Payload | ConvertTo-Json -Compress
+    $result = Invoke-ServiceDeskRequest -Url ([string]$script:Cfg.ServiceDeskApiUrl) -Method 'POST' -JsonBody $json
+    return [int]$result.StatusCode
 }
 
 function Show-TicketDialog {

@@ -332,6 +332,54 @@ Assert-Equal 'news url kept' $widgetCfg.NewsUrl 'https://intranet.example/news.j
 Assert-Equal 'poll floor' $widgetCfg.NewsPollMinutes 1
 Assert-Equal 'corner fallback' $widgetCfg.WidgetCorner 'BottomRight'
 Assert-Equal 'widget can be disabled' $widgetCfg.WidgetEnabled $false
+Assert-Equal 'jira off by default' $widgetCfg.JiraBaseUrl ''
+$jiraCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{
+    Widget = [pscustomobject]@{
+        JiraBaseUrl = 'https://jira.example/jira'
+        ServiceDeskApiUrl = 'https://hooks.example/ticket'
+        ServiceDeskUrl = ''
+    }
+})
+Assert-Equal 'jira base kept' $jiraCfg.JiraBaseUrl 'https://jira.example/jira'
+Assert-Equal 'webhook kept beside jira' $jiraCfg.ServiceDeskApiUrl 'https://hooks.example/ticket'
+$badJira = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ JiraBaseUrl = 'not a url' } })
+Assert-Equal 'bad jira dropped' $badJira.JiraBaseUrl ''
+$deskPage = '{"size":2,"start":0,"limit":50,"isLastPage":false,"values":[{"id":"1","projectId":"10001","projectKey":"ITHD","projectName":"IT Helpdesk"},{"id":"2","projectId":"10002","projectKey":"HR","projectName":"Кадры"}]}' | ConvertFrom-Json
+$desks = ConvertFrom-JiraServiceDesks $deskPage
+Assert-Equal 'desk count' @($desks).Count 2
+Assert-Equal 'desk key' $desks[0].ProjectKey 'ITHD'
+Assert-Equal 'desk label' (Format-JiraDeskLabel $desks[0]) 'IT Helpdesk (ITHD)'
+Assert-Equal 'desk label same key' (Format-JiraDeskLabel ([pscustomobject]@{ ProjectName = 'HR'; ProjectKey = 'HR'; Id = '2' })) 'HR'
+Assert-Equal 'next jira page' (Get-JiraNextStart -Page $deskPage -FallbackStart 0) 2
+$onePage = '{"isLastPage":true,"values":[{"id":"9","projectKey":"OPS","projectName":"Эксплуатация"}]}' | ConvertFrom-Json
+$oneDesk = ConvertFrom-JiraServiceDesks $onePage
+Assert-Equal 'one desk key' $oneDesk[0].ProjectKey 'OPS'
+Assert-Equal 'one desk label' (Format-JiraDeskLabel $oneDesk[0]) 'Эксплуатация (OPS)'
+Assert-Equal 'last jira page' (Get-JiraNextStart -Page $onePage -FallbackStart 0) -1
+$emptyPage = '{"isLastPage":true,"values":[]}' | ConvertFrom-Json
+$noDesks = ConvertFrom-JiraServiceDesks $emptyPage
+Assert-Equal 'no desks' $noDesks.Count 0
+$noSize = '{"isLastPage":false,"start":50,"values":[{"id":"3","projectKey":"A","projectName":"A"}]}' | ConvertFrom-Json
+Assert-Equal 'next from values' (Get-JiraNextStart -Page $noSize -FallbackStart 0) 51
+$typePage = '{"isLastPage":true,"values":[{"id":"10","name":"Инцидент"},{"id":"11","name":"Доступ"}]}' | ConvertFrom-Json
+$types = ConvertFrom-JiraRequestTypes $typePage
+Assert-Equal 'request type count' @($types).Count 2
+Assert-Equal 'request type name' $types[1].Name 'Доступ'
+$jiraPayload = New-JiraRequestPayload -ServiceDeskId ' 1 ' -RequestTypeId ' 10 ' -Summary ' Не печатает ' -Description 'Принтер молчит' -User ' CONTOSO\ivan ' -Computer ' PC-1 '
+Assert-Equal 'jira desk id' $jiraPayload.serviceDeskId '1'
+Assert-Equal 'jira type id' $jiraPayload.requestTypeId '10'
+Assert-Equal 'jira summary' $jiraPayload.requestFieldValues.summary 'Не печатает'
+Assert-Contains 'jira user line' $jiraPayload.requestFieldValues.description 'Пользователь: CONTOSO\ivan'
+Assert-Contains 'jira computer line' $jiraPayload.requestFieldValues.description 'Компьютер: PC-1'
+Assert-Equal 'jira error message' (Get-JiraErrorText '{"errorMessage":"Нет прав"}') 'Нет прав'
+Assert-Contains 'jira field error' (Get-JiraErrorText '{"errors":{"summary":"обязательно"}}') 'summary: обязательно'
+Assert-Equal 'jira plain error' (Get-JiraErrorText 'denied') 'denied'
+Assert-Equal 'issue key' (Get-JiraIssueKey '{"issueKey":"ITHD-12","issueId":"100"}') 'ITHD-12'
+Assert-Equal 'desk url' (Get-JiraServiceDeskUrl -BaseUrl 'https://jira.example/' -Start 0 -Limit 50) 'https://jira.example/rest/servicedeskapi/servicedesk?start=0&limit=50'
+Assert-Equal 'type url' (Get-JiraRequestTypeUrl -BaseUrl 'https://jira.example' -ServiceDeskId '1' -Start 0 -Limit 500) 'https://jira.example/rest/servicedeskapi/servicedesk/1/requesttype?start=0&limit=100'
+Assert-Equal 'create url' (Get-JiraCreateRequestUrl 'https://jira.example') 'https://jira.example/rest/servicedeskapi/request'
+Assert-Equal 'portal default' (Get-JiraPortalUrl -BaseUrl 'https://jira.example' -ExplicitUrl '') 'https://jira.example/servicedesk/customer/portals'
+Assert-Equal 'portal explicit' (Get-JiraPortalUrl -BaseUrl 'https://jira.example' -ExplicitUrl 'https://sd.example/portal') 'https://sd.example/portal'
 
 foreach ($name in @('DesktopSwitch.Logic.ps1', 'DesktopSwitch.ps1', 'DesktopSwitch.Widget.ps1', 'Install-DesktopSwitch.ps1', 'Uninstall-DesktopSwitch.ps1')) {
     $path = Join-Path $root $name

@@ -213,6 +213,7 @@ function Get-EffectiveDesktopConfig {
         ServiceDeskUrl = Select-SingleHttpUrl (Get-Prop $widget 'ServiceDeskUrl' '')
         ServiceDeskApiUrl = Select-SingleHttpUrl (Get-Prop $widget 'ServiceDeskApiUrl' '')
         ServiceDeskToken = ([string](Get-Prop $widget 'ServiceDeskToken' '')).Trim()
+        JiraBaseUrl = Select-SingleHttpUrl (Get-Prop $widget 'JiraBaseUrl' '')
         NewsUrl = Select-SingleHttpUrl (Get-Prop $widget 'NewsUrl' '')
         NewsPollMinutes = Get-ClampedMinutes (ConvertTo-Int (Get-Prop $widget 'NewsPollMinutes' 10) 10)
     }
@@ -773,4 +774,217 @@ function New-TicketPayload {
         computer = $pc
         createdAt = $CreatedAt
     }
+}
+
+function Get-JiraApiRoot {
+    param([string]$BaseUrl)
+    if ([string]::IsNullOrWhiteSpace($BaseUrl)) { return '' }
+    return $BaseUrl.Trim().TrimEnd('/')
+}
+
+function Get-JiraServiceDeskUrl {
+    param([string]$BaseUrl, [int]$Start, [int]$Limit)
+    $root = Get-JiraApiRoot $BaseUrl
+    if ([string]::IsNullOrWhiteSpace($root)) { return '' }
+    if ($Start -lt 0) { $Start = 0 }
+    if ($Limit -lt 1) { $Limit = 50 }
+    if ($Limit -gt 100) { $Limit = 100 }
+    return ('{0}/rest/servicedeskapi/servicedesk?start={1}&limit={2}' -f $root, $Start, $Limit)
+}
+
+function Get-JiraRequestTypeUrl {
+    param([string]$BaseUrl, [string]$ServiceDeskId, [int]$Start, [int]$Limit)
+    $root = Get-JiraApiRoot $BaseUrl
+    if ([string]::IsNullOrWhiteSpace($root) -or [string]::IsNullOrWhiteSpace($ServiceDeskId)) { return '' }
+    if ($Start -lt 0) { $Start = 0 }
+    if ($Limit -lt 1) { $Limit = 50 }
+    if ($Limit -gt 100) { $Limit = 100 }
+    $id = [Uri]::EscapeDataString($ServiceDeskId.Trim())
+    return ('{0}/rest/servicedeskapi/servicedesk/{1}/requesttype?start={2}&limit={3}' -f $root, $id, $Start, $Limit)
+}
+
+function Get-JiraCreateRequestUrl {
+    param([string]$BaseUrl)
+    $root = Get-JiraApiRoot $BaseUrl
+    if ([string]::IsNullOrWhiteSpace($root)) { return '' }
+    return ($root + '/rest/servicedeskapi/request')
+}
+
+function Get-JiraPortalUrl {
+    param([string]$BaseUrl, [string]$ExplicitUrl)
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitUrl)) { return $ExplicitUrl.Trim() }
+    $root = Get-JiraApiRoot $BaseUrl
+    if ([string]::IsNullOrWhiteSpace($root)) { return '' }
+    return ($root + '/servicedesk/customer/portals')
+}
+
+function Get-JiraValueCount {
+    param($Page)
+    $values = Get-Prop $Page 'values' $null
+    $count = 0
+    foreach ($item in @($values)) {
+        if ($null -ne $item) { $count++ }
+    }
+    return $count
+}
+
+function Get-JiraNextStart {
+    param($Page, [int]$FallbackStart)
+    if ($null -eq $Page) { return -1 }
+    $lastProp = $Page.PSObject.Properties['isLastPage']
+    if ($null -ne $lastProp -and (ConvertTo-Bool $lastProp.Value $true)) { return -1 }
+    $size = 0
+    $sizeProp = $Page.PSObject.Properties['size']
+    if ($null -ne $sizeProp) { $size = ConvertTo-Int $sizeProp.Value 0 }
+    if ($size -le 0) { $size = Get-JiraValueCount $Page }
+    if ($size -le 0) { return -1 }
+    $start = $FallbackStart
+    $startProp = $Page.PSObject.Properties['start']
+    if ($null -ne $startProp) { $start = ConvertTo-Int $startProp.Value $FallbackStart }
+    return ($start + $size)
+}
+
+function ConvertFrom-JiraServiceDesks {
+    param($Page)
+    $items = New-Object System.Collections.Generic.List[object]
+    $values = Get-Prop $Page 'values' $null
+    foreach ($desk in @($values)) {
+        if ($null -eq $desk) { continue }
+        $id = ([string](Get-Prop $desk 'id' '')).Trim()
+        if ([string]::IsNullOrWhiteSpace($id)) { continue }
+        $items.Add([pscustomobject]@{
+            Id = $id
+            ProjectKey = ([string](Get-Prop $desk 'projectKey' '')).Trim()
+            ProjectName = ([string](Get-Prop $desk 'projectName' '')).Trim()
+            ProjectId = ([string](Get-Prop $desk 'projectId' '')).Trim()
+        })
+    }
+    return ,$items.ToArray()
+}
+
+function ConvertFrom-JiraRequestTypes {
+    param($Page)
+    $items = New-Object System.Collections.Generic.List[object]
+    $values = Get-Prop $Page 'values' $null
+    foreach ($kind in @($values)) {
+        if ($null -eq $kind) { continue }
+        $id = ([string](Get-Prop $kind 'id' '')).Trim()
+        if ([string]::IsNullOrWhiteSpace($id)) { continue }
+        $items.Add([pscustomobject]@{
+            Id = $id
+            Name = ([string](Get-Prop $kind 'name' '')).Trim()
+        })
+    }
+    return ,$items.ToArray()
+}
+
+function Format-JiraDeskLabel {
+    param($Desk)
+    if ($null -eq $Desk) { return '' }
+    $name = ([string](Get-Prop $Desk 'ProjectName' '')).Trim()
+    $key = ([string](Get-Prop $Desk 'ProjectKey' '')).Trim()
+    $id = ([string](Get-Prop $Desk 'Id' '')).Trim()
+    if ([string]::IsNullOrWhiteSpace($name)) { $name = $key }
+    if ([string]::IsNullOrWhiteSpace($name)) { $name = $id }
+    if (-not [string]::IsNullOrWhiteSpace($key) -and $name -ne $key) {
+        return ('{0} ({1})' -f $name, $key)
+    }
+    return $name
+}
+
+function Format-JiraRequestDescription {
+    param([string]$Description, [string]$User, [string]$Computer)
+    $text = ''
+    $userName = ''
+    $pc = ''
+    if ($null -ne $Description) { $text = $Description.Trim() }
+    if ($null -ne $User) { $userName = $User.Trim() }
+    if ($null -ne $Computer) { $pc = $Computer.Trim() }
+    $parts = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($text)) { $parts.Add($text) }
+    $tail = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($userName)) { $tail.Add(('Пользователь: {0}' -f $userName)) }
+    if (-not [string]::IsNullOrWhiteSpace($pc)) { $tail.Add(('Компьютер: {0}' -f $pc)) }
+    if ($tail.Count -gt 0) {
+        if ($parts.Count -gt 0) { $parts.Add('') }
+        foreach ($line in $tail) { $parts.Add($line) }
+    }
+    return ($parts -join "`n")
+}
+
+function New-JiraRequestPayload {
+    param(
+        [string]$ServiceDeskId,
+        [string]$RequestTypeId,
+        [string]$Summary,
+        [string]$Description,
+        [string]$User,
+        [string]$Computer
+    )
+    $desk = ''
+    $kind = ''
+    $theme = ''
+    if ($null -ne $ServiceDeskId) { $desk = $ServiceDeskId.Trim() }
+    if ($null -ne $RequestTypeId) { $kind = $RequestTypeId.Trim() }
+    if ($null -ne $Summary) { $theme = $Summary.Trim() }
+    return [pscustomobject]@{
+        serviceDeskId = $desk
+        requestTypeId = $kind
+        requestFieldValues = [pscustomobject]@{
+            summary = $theme
+            description = Format-JiraRequestDescription -Description $Description -User $User -Computer $Computer
+        }
+    }
+}
+
+function Get-JiraErrorText {
+    param($Body)
+    if ($null -eq $Body) { return '' }
+    $parsed = $Body
+    if ($Body -is [string]) {
+        $raw = $Body.Trim()
+        if ([string]::IsNullOrWhiteSpace($raw)) { return '' }
+        try {
+            $parsed = $raw | ConvertFrom-Json
+        } catch {
+            if ($raw.Length -gt 240) { return $raw.Substring(0, 240) }
+            return $raw
+        }
+    }
+    $message = ([string](Get-Prop $parsed 'errorMessage' '')).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($message)) { return $message }
+    $parts = New-Object System.Collections.Generic.List[string]
+    $messages = Get-Prop $parsed 'errorMessages' $null
+    foreach ($item in @($messages)) {
+        $line = ([string]$item).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($line)) { $parts.Add($line) }
+    }
+    $errors = Get-Prop $parsed 'errors' $null
+    if ($null -ne $errors) {
+        foreach ($prop in $errors.PSObject.Properties) {
+            $line = ([string]$prop.Value).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($line)) {
+                $parts.Add(('{0}: {1}' -f $prop.Name, $line))
+            }
+        }
+    }
+    if ($parts.Count -gt 0) {
+        $joined = ($parts -join '; ')
+        if ($joined.Length -gt 400) { return $joined.Substring(0, 400) }
+        return $joined
+    }
+    $message = ([string](Get-Prop $parsed 'message' '')).Trim()
+    if ($message.Length -gt 400) { return $message.Substring(0, 400) }
+    return $message
+}
+
+function Get-JiraIssueKey {
+    param($Body)
+    if ($null -eq $Body) { return '' }
+    $parsed = $Body
+    if ($Body -is [string]) {
+        if ([string]::IsNullOrWhiteSpace($Body)) { return '' }
+        try { $parsed = $Body | ConvertFrom-Json } catch { return '' }
+    }
+    return ([string](Get-Prop $parsed 'issueKey' '')).Trim()
 }
