@@ -17,8 +17,8 @@ $script:AllowExit = $false
 $script:PanelOpen = $false
 $script:PanelHiding = $false
 $script:WidgetPage = 'Ticket'
-$script:SupportPanelWidth = 300
-$script:SupportPanelHeight = 392
+$script:SupportPanelWidth = 360
+$script:SupportPanelHeight = 592
 $script:NewsPopup = $null
 $script:NewsPopupBody = $null
 $script:NewsPopupTitle = $null
@@ -303,6 +303,31 @@ function New-RoundedPath {
     return $path
 }
 
+function New-SendGlyph {
+    $bmp = New-Object System.Drawing.Bitmap 16, 16
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.Clear([System.Drawing.Color]::Transparent)
+    $brush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
+    $points = New-Object System.Drawing.Point[] 4
+    $points[0] = New-Object System.Drawing.Point(1, 7)
+    $points[1] = New-Object System.Drawing.Point(15, 1)
+    $points[2] = New-Object System.Drawing.Point(8, 15)
+    $points[3] = New-Object System.Drawing.Point(7, 8)
+    $g.FillPolygon($brush, $points)
+    $brush.Dispose()
+    $g.Dispose()
+    return $bmp
+}
+
+function Update-FlatButtonRegion {
+    param($Button)
+    if ($null -eq $Button) { return }
+    $old = $Button.Region
+    $Button.Region = New-Object System.Drawing.Region((New-RoundedPath -Width $Button.Width -Height $Button.Height -Radius 12))
+    if ($null -ne $old) { $old.Dispose() }
+}
+
 function New-FlatButton {
     param([string]$Text, [System.Drawing.Point]$Location, [System.Drawing.Size]$Size)
     $button = New-Object System.Windows.Forms.Button
@@ -310,14 +335,137 @@ function New-FlatButton {
     $button.Location = $Location
     $button.Size = $Size
     $button.FlatStyle = 'Flat'
-    $button.BackColor = [System.Drawing.Color]::FromArgb(24, 24, 27)
+    $button.BackColor = [System.Drawing.Color]::FromArgb(47, 107, 255)
     $button.ForeColor = [System.Drawing.Color]::White
-    $button.Font = $script:TabFontBold
+    if ($script:ButtonFont) { $button.Font = $script:ButtonFont }
+    else { $button.Font = $script:TabFontBold }
     $button.FlatAppearance.BorderSize = 0
-    $button.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(39, 39, 42)
+    $button.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(37, 90, 230)
     $button.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $button.Region = New-Object System.Drawing.Region((New-RoundedPath -Width $Size.Width -Height $Size.Height -Radius 8))
+    $button.Image = New-SendGlyph
+    $button.TextImageRelation = 'ImageBeforeText'
+    $button.ImageAlign = 'MiddleCenter'
+    $button.TextAlign = 'MiddleCenter'
+    Update-FlatButtonRegion $button
     return $button
+}
+
+function Update-SoftFieldSize {
+    param($Field, [int]$Width, [int]$Height)
+    if ($null -eq $Field) { return }
+    $shell = $Field.Shell
+    $fill = $Field.Fill
+    $editor = $Field.Editor
+    $icon = $Field.Icon
+    $shell.Size = New-Object System.Drawing.Size($Width, $Height)
+    $oldShell = $shell.Region
+    $shell.Region = New-Object System.Drawing.Region((New-RoundedPath -Width $Width -Height $Height -Radius 12))
+    if ($null -ne $oldShell) { $oldShell.Dispose() }
+    $fill.SetBounds(1, 1, ($Width - 2), ($Height - 2))
+    $oldFill = $fill.Region
+    $fill.Region = New-Object System.Drawing.Region((New-RoundedPath -Width ($Width - 2) -Height ($Height - 2) -Radius 11))
+    if ($null -ne $oldFill) { $oldFill.Dispose() }
+    if ($null -ne $icon) { $icon.SetBounds(2, 0, 32, ($Height - 2)) }
+    if ($editor -is [System.Windows.Forms.TextBox] -and $editor.Multiline) {
+        $editor.SetBounds(36, 8, ($Width - 52), ($Height - 18))
+    }
+}
+
+function New-SoftField {
+    param(
+        [string]$Kind,
+        [string]$Icon,
+        [bool]$ReadOnly = $false,
+        [int]$Width = 328,
+        [int]$Height = 40
+    )
+    $border = [System.Drawing.Color]::FromArgb(226, 232, 240)
+    $fillColor = [System.Drawing.Color]::White
+    if ($ReadOnly) { $fillColor = [System.Drawing.Color]::FromArgb(248, 250, 252) }
+    $iconColor = [System.Drawing.Color]::FromArgb(148, 163, 184)
+    $ink = [System.Drawing.Color]::FromArgb(24, 24, 27)
+    $shell = New-Object System.Windows.Forms.Panel
+    $shell.Size = New-Object System.Drawing.Size($Width, $Height)
+    $shell.BackColor = $border
+    $shell.Region = New-Object System.Drawing.Region((New-RoundedPath -Width $Width -Height $Height -Radius 12))
+    $fill = New-Object System.Windows.Forms.Panel
+    $fill.SetBounds(1, 1, ($Width - 2), ($Height - 2))
+    $fill.BackColor = $fillColor
+    $fill.Region = New-Object System.Drawing.Region((New-RoundedPath -Width ($Width - 2) -Height ($Height - 2) -Radius 11))
+    $iconLabel = New-Object System.Windows.Forms.Label
+    $iconLabel.Text = $Icon
+    $iconLabel.Font = $script:IconFont
+    $iconLabel.ForeColor = $iconColor
+    $iconLabel.BackColor = $fillColor
+    $iconLabel.TextAlign = 'MiddleCenter'
+    $iconLabel.SetBounds(2, 0, 32, ($Height - 2))
+    if ($Kind -eq 'Combo') {
+        $editor = New-Object System.Windows.Forms.ComboBox
+        $editor.DropDownStyle = 'DropDownList'
+        $editor.FlatStyle = 'Flat'
+        $editor.Font = $script:FieldFont
+        $editor.BackColor = $fillColor
+        $editor.ForeColor = $ink
+        $editor.SetBounds(34, 7, ($Width - 48), 24)
+    } elseif ($Kind -eq 'Note') {
+        $editor = New-Object System.Windows.Forms.TextBox
+        $editor.Multiline = $true
+        $editor.ScrollBars = 'Vertical'
+        $editor.BorderStyle = 'None'
+        $editor.Font = $script:FieldFont
+        $editor.BackColor = $fillColor
+        $editor.ForeColor = $ink
+        $editor.AcceptsReturn = $true
+        $editor.SetBounds(36, 8, ($Width - 52), ($Height - 18))
+    } else {
+        $editor = New-Object System.Windows.Forms.TextBox
+        $editor.BorderStyle = 'None'
+        $editor.Font = $script:FieldFont
+        $editor.BackColor = $fillColor
+        $editor.ForeColor = $ink
+        $editor.SetBounds(36, 9, ($Width - 52), 22)
+        if ($ReadOnly) {
+            $editor.ReadOnly = $true
+            $editor.TabStop = $false
+        }
+    }
+    $focusEditor = {
+        try { $editor.Focus() } catch { }
+    }.GetNewClosure()
+    $fill.Add_Click($focusEditor)
+    $iconLabel.Add_Click($focusEditor)
+    $shell.Add_Click($focusEditor)
+    $fill.Controls.Add($iconLabel)
+    $fill.Controls.Add($editor)
+    $shell.Controls.Add($fill)
+    return @{ Shell = $shell; Editor = $editor; Fill = $fill; Icon = $iconLabel }
+}
+
+function Set-FieldCue {
+    param($Box, [string]$Cue)
+    if ($null -eq $Box -or [string]::IsNullOrWhiteSpace($Cue)) { return }
+    if (-not ('FieldCue' -as [type])) {
+        try {
+            $cueSource = @'
+using System;
+using System.Runtime.InteropServices;
+public static class FieldCue {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+}
+'@
+            Add-Type -TypeDefinition $cueSource -ErrorAction Stop
+        } catch {
+            return
+        }
+    }
+    $target = $Box
+    $cueText = $Cue
+    $apply = {
+        try { [FieldCue]::SendMessage($target.Handle, 0x1501, [IntPtr]1, $cueText) | Out-Null } catch { }
+    }.GetNewClosure()
+    if ($Box.IsHandleCreated) { & $apply }
+    else { $Box.Add_HandleCreated($apply) }
 }
 
 function Clear-ChildControls {
@@ -342,24 +490,25 @@ function Update-NewsRows {
         $empty.Font = $script:TabFontBold
         $empty.ForeColor = [System.Drawing.Color]::FromArgb(31, 41, 51)
         $empty.BackColor = [System.Drawing.Color]::White
-        $empty.SetBounds(8, 48, 260, 24)
+        $emptyWidth = [int]$script:SupportPanelWidth - 32
+        $empty.SetBounds(16, 48, $emptyWidth, 24)
         $hint = New-Object System.Windows.Forms.Label
         $hint.Text = 'Здесь будут новости и технические работы.'
         $hint.TextAlign = 'MiddleCenter'
         $hint.Font = $script:TabFont
         $hint.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
         $hint.BackColor = [System.Drawing.Color]::White
-        $hint.SetBounds(8, 76, 260, 36)
+        $hint.SetBounds(16, 76, $emptyWidth, 36)
         $list.Controls.Add($empty)
         $list.Controls.Add($hint)
         return
     }
     $y = 4
-    $rowWidth = 276
+    $rowWidth = [int]$script:SupportPanelWidth - 32
     foreach ($item in $items) {
         $url = [string]$item.Url
         $row = New-Object System.Windows.Forms.Panel
-        $row.SetBounds(8, $y, $rowWidth, 64)
+        $row.SetBounds(16, $y, $rowWidth, 64)
         $row.BackColor = [System.Drawing.Color]::White
         $row.Tag = $url
         $rowColor = $row.BackColor
@@ -378,7 +527,7 @@ function Update-NewsRows {
         $title.ForeColor = [System.Drawing.Color]::FromArgb(24, 24, 27)
         $title.BackColor = $rowColor
         $title.AutoEllipsis = $true
-        $title.SetBounds(16, 4, 156, 18)
+        $title.SetBounds(18, 4, ($rowWidth - 128), 18)
         $title.Tag = $url
         $when = New-Object System.Windows.Forms.Label
         $when.Text = Format-NoticeStamp ([string]$item.PublishedAt)
@@ -386,14 +535,14 @@ function Update-NewsRows {
         $when.ForeColor = [System.Drawing.Color]::FromArgb(113, 113, 122)
         $when.BackColor = $rowColor
         $when.TextAlign = 'MiddleRight'
-        $when.SetBounds(172, 4, 92, 18)
+        $when.SetBounds(($rowWidth - 100), 4, 92, 18)
         $when.Tag = $url
         $body = New-Object System.Windows.Forms.Label
         $body.Text = Get-NoticeSnippet ([string]$item.Body)
         $body.Font = $script:RowBodyFont
         $body.ForeColor = [System.Drawing.Color]::FromArgb(113, 113, 122)
         $body.BackColor = $rowColor
-        $body.SetBounds(16, 24, 248, 32)
+        $body.SetBounds(18, 24, ($rowWidth - 28), 32)
         $rule = New-Object System.Windows.Forms.Panel
         $rule.SetBounds(0, 63, $rowWidth, 1)
         $rule.BackColor = [System.Drawing.Color]::FromArgb(244, 244, 245)
@@ -478,34 +627,42 @@ function Set-TicketFieldLayout {
     param([bool]$ShowProject)
     if ($null -eq $script:WidgetUi) { return }
     $ui = $script:WidgetUi
+    $fieldW = [int]$script:SupportPanelWidth - 32
+    $ui.LoginLabel.SetBounds(16, 2, $fieldW, 14)
+    $ui.LoginHost.SetBounds(16, 18, $fieldW, 40)
+    $ui.ComputerLabel.SetBounds(16, 66, $fieldW, 14)
+    $ui.ComputerHost.SetBounds(16, 82, $fieldW, 40)
     $ui.ProjectLabel.Visible = $ShowProject
-    $ui.ProjectBox.Visible = $ShowProject
+    $ui.ProjectHost.Visible = $ShowProject
     if ($ShowProject) {
         if (Test-JiraTicketMode) { $ui.CategoryLabel.Text = 'Тип запроса' }
         else { $ui.CategoryLabel.Text = 'Категория' }
-        $ui.ProjectLabel.SetBounds(10, 44, 280, 14)
-        $ui.ProjectBox.SetBounds(10, 58, 280, 22)
-        $ui.CategoryLabel.SetBounds(10, 84, 280, 14)
-        $ui.CategoryBox.SetBounds(10, 98, 280, 22)
-        $ui.SubjectLabel.SetBounds(10, 124, 280, 14)
-        $ui.SubjectBox.SetBounds(10, 138, 280, 22)
-        $ui.BodyLabel.SetBounds(10, 164, 280, 14)
-        $ui.BodyBox.SetBounds(10, 178, 280, 28)
-        $ui.TicketStatus.SetBounds(10, 208, 280, 20)
-        $ui.SendButton.SetBounds(10, 230, 280, 30)
-        $ui.PortalLink.SetBounds(10, 264, 200, 16)
+        $ui.ProjectLabel.SetBounds(16, 130, $fieldW, 14)
+        $ui.ProjectHost.SetBounds(16, 146, $fieldW, 40)
+        $ui.CategoryLabel.SetBounds(16, 194, $fieldW, 14)
+        $ui.CategoryHost.SetBounds(16, 210, $fieldW, 40)
+        $ui.SubjectLabel.SetBounds(16, 258, $fieldW, 14)
+        $ui.SubjectHost.SetBounds(16, 274, $fieldW, 40)
+        $ui.BodyLabel.SetBounds(16, 322, $fieldW, 14)
+        Update-SoftFieldSize -Field $ui.BodyField -Width $fieldW -Height 56
+        $ui.BodyHost.SetBounds(16, 338, $fieldW, 56)
+        $ui.TicketStatus.SetBounds(16, 398, $fieldW, 16)
+        $ui.SendButton.SetBounds(16, 416, $fieldW, 44)
+        $ui.PortalLink.SetBounds(16, 464, 240, 16)
     } else {
         $ui.CategoryLabel.Text = 'Категория'
-        $ui.CategoryLabel.SetBounds(10, 44, 280, 14)
-        $ui.CategoryBox.SetBounds(10, 58, 280, 22)
-        $ui.SubjectLabel.SetBounds(10, 84, 280, 14)
-        $ui.SubjectBox.SetBounds(10, 98, 280, 22)
-        $ui.BodyLabel.SetBounds(10, 124, 280, 14)
-        $ui.BodyBox.SetBounds(10, 138, 280, 64)
-        $ui.TicketStatus.SetBounds(10, 206, 280, 24)
-        $ui.SendButton.SetBounds(10, 232, 280, 30)
-        $ui.PortalLink.SetBounds(10, 266, 200, 16)
+        $ui.CategoryLabel.SetBounds(16, 130, $fieldW, 14)
+        $ui.CategoryHost.SetBounds(16, 146, $fieldW, 40)
+        $ui.SubjectLabel.SetBounds(16, 194, $fieldW, 14)
+        $ui.SubjectHost.SetBounds(16, 210, $fieldW, 40)
+        $ui.BodyLabel.SetBounds(16, 258, $fieldW, 14)
+        Update-SoftFieldSize -Field $ui.BodyField -Width $fieldW -Height 104
+        $ui.BodyHost.SetBounds(16, 274, $fieldW, 104)
+        $ui.TicketStatus.SetBounds(16, 384, $fieldW, 16)
+        $ui.SendButton.SetBounds(16, 402, $fieldW, 44)
+        $ui.PortalLink.SetBounds(16, 450, 240, 16)
     }
+    Update-FlatButtonRegion $ui.SendButton
 }
 
 function Update-TicketActions {
@@ -524,7 +681,7 @@ function Update-TicketActions {
         $ui.CategoryBox.Enabled = $true
         $ui.SubjectBox.Enabled = $true
         $ui.BodyBox.Enabled = $true
-        $ui.SendButton.Text = 'Отправить'
+        $ui.SendButton.Text = 'Отправить заявку'
         $ui.SendButton.Enabled = $true
         return
     }
@@ -534,13 +691,13 @@ function Update-TicketActions {
     $ui.BodyBox.Enabled = $hasApi
     $ui.CategoryBox.Enabled = $hasApi
     if ($hasApi) {
-        $ui.SendButton.Text = 'Отправить'
+        $ui.SendButton.Text = 'Отправить заявку'
         $ui.SendButton.Enabled = $true
     } elseif ($hasPortal) {
         $ui.SendButton.Text = 'Открыть портал'
         $ui.SendButton.Enabled = $true
     } else {
-        $ui.SendButton.Text = 'Отправить'
+        $ui.SendButton.Text = 'Отправить заявку'
         $ui.SendButton.Enabled = $false
         if ([string]::IsNullOrWhiteSpace([string]$ui.TicketStatus.Text)) {
             $ui.TicketStatus.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
@@ -558,20 +715,20 @@ function Apply-SupportPageVisual {
     $newsOn = $Page -eq 'News'
     $ui.NewsPage.Visible = $newsOn
     $ui.TicketPage.Visible = -not $newsOn
-    $accent = [System.Drawing.Color]::FromArgb(24, 24, 27)
+    $ink = [System.Drawing.Color]::FromArgb(24, 24, 27)
     $muted = [System.Drawing.Color]::FromArgb(113, 113, 122)
     if ($newsOn) {
-        $ui.NewsTab.ForeColor = $accent
+        $ui.NewsTab.ForeColor = $ink
         $ui.TicketTab.ForeColor = $muted
         $ui.NewsTab.Font = $script:TabFontBold
         $ui.TicketTab.Font = $script:TabFont
-        $ui.TabLine.SetBounds(132, 33, 48, 1)
+        $ui.TabLine.SetBounds(132, 31, 52, 2)
     } else {
         $ui.NewsTab.ForeColor = $muted
-        $ui.TicketTab.ForeColor = $accent
+        $ui.TicketTab.ForeColor = $ink
         $ui.NewsTab.Font = $script:TabFont
         $ui.TicketTab.Font = $script:TabFontBold
-        $ui.TabLine.SetBounds(16, 33, 44, 1)
+        $ui.TabLine.SetBounds(20, 31, 52, 2)
         $session = Get-WindowsSessionIdentity
         $ui.LoginBox.Text = [string]$session.Login
         $ui.ComputerBox.Text = [string]$session.Computer
@@ -660,7 +817,7 @@ function New-LauncherButton {
     $form.ShowInTaskbar = $false
     $form.StartPosition = 'Manual'
     $form.TopMost = $true
-    $form.BackColor = [System.Drawing.Color]::FromArgb(24, 24, 27)
+    $form.BackColor = [System.Drawing.Color]::FromArgb(47, 107, 255)
     $form.ClientSize = New-Object System.Drawing.Size(52, 52)
     $form.Text = Get-WidgetTitle
     $form.Cursor = [System.Windows.Forms.Cursors]::Hand
@@ -670,8 +827,8 @@ function New-LauncherButton {
     $form.Add_Paint({
         $g = $_.Graphics
         $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-        $fill = [System.Drawing.Color]::FromArgb(24, 24, 27)
-        if ($script:LauncherHot) { $fill = [System.Drawing.Color]::FromArgb(39, 39, 42) }
+        $fill = [System.Drawing.Color]::FromArgb(47, 107, 255)
+        if ($script:LauncherHot) { $fill = [System.Drawing.Color]::FromArgb(37, 90, 230) }
         $brush = New-Object System.Drawing.SolidBrush $fill
         $g.FillEllipse($brush, 0, 0, 51, 51)
         $brush.Dispose()
@@ -691,19 +848,16 @@ function New-LauncherButton {
         $pen.Dispose()
         $count = Get-UnopenedNoticeCount
         if ($count -gt 0) {
-            $badge = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(24, 24, 27))
-            $ring = New-Object System.Drawing.Pen ([System.Drawing.Color]::White, 2)
+            $badge = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
             $g.FillEllipse($badge, 32, 2, 16, 16)
-            $g.DrawEllipse($ring, 32, 2, 16, 16)
             $badge.Dispose()
-            $ring.Dispose()
             $text = [string]$count
             if ($count -gt 9) { $text = '9' }
             $font = New-Object System.Drawing.Font('Segoe UI', 7, [System.Drawing.FontStyle]::Bold)
             $format = New-Object System.Drawing.StringFormat
             $format.Alignment = [System.Drawing.StringAlignment]::Center
             $format.LineAlignment = [System.Drawing.StringAlignment]::Center
-            $ink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
+            $ink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(47, 107, 255))
             $rect = New-Object System.Drawing.RectangleF(32, 2, 16, 16)
             $g.DrawString($text, $font, $ink, $rect, $format)
             $ink.Dispose()
@@ -731,50 +885,71 @@ function New-LauncherButton {
 }
 
 function New-SupportPanel {
-    $accent = [System.Drawing.Color]::FromArgb(24, 24, 27)
+    $accent = [System.Drawing.Color]::FromArgb(47, 107, 255)
     $headerColor = [System.Drawing.Color]::White
     $ink = [System.Drawing.Color]::FromArgb(24, 24, 27)
     $muted = [System.Drawing.Color]::FromArgb(113, 113, 122)
+    $labelColor = [System.Drawing.Color]::FromArgb(71, 85, 105)
+    $panelW = [int]$script:SupportPanelWidth
+    $panelH = [int]$script:SupportPanelHeight
+    $headerH = 76
+    $pageY = 34
+    $pageH = $panelH - $headerH - $pageY
     $panel = New-Object System.Windows.Forms.Form
     $panel.FormBorderStyle = 'None'
     $panel.ShowInTaskbar = $false
     $panel.StartPosition = 'Manual'
     $panel.TopMost = $true
     $panel.BackColor = [System.Drawing.Color]::White
-    $panel.ClientSize = New-Object System.Drawing.Size([int]$script:SupportPanelWidth, [int]$script:SupportPanelHeight)
+    $panel.ClientSize = New-Object System.Drawing.Size($panelW, $panelH)
     $panel.Text = Get-WidgetTitle
     $panel.Font = $script:TabFont
     $panel.KeyPreview = $true
-    $panel.Region = New-Object System.Drawing.Region((New-RoundedPath -Width ([int]$script:SupportPanelWidth) -Height ([int]$script:SupportPanelHeight) -Radius 16))
+    $panel.Region = New-Object System.Drawing.Region((New-RoundedPath -Width $panelW -Height $panelH -Radius 20))
 
     $header = New-Object System.Windows.Forms.Panel
-    $header.SetBounds(0, 0, 300, 72)
+    $header.SetBounds(0, 0, $panelW, $headerH)
     $header.BackColor = $headerColor
     $titleText = Get-WidgetTitle
+    $markText = 'С'
+    $trimmedTitle = $titleText.Trim()
+    if ($trimmedTitle.Length -gt 0) { $markText = $trimmedTitle.Substring(0, 1).ToUpper() }
+    $mark = New-Object System.Windows.Forms.Panel
+    $mark.SetBounds(16, 18, 36, 36)
+    $mark.BackColor = $accent
+    $mark.Region = New-Object System.Drawing.Region((New-RoundedPath -Width 36 -Height 36 -Radius 10))
+    $markLetter = New-Object System.Windows.Forms.Label
+    $markLetter.Text = $markText
+    $markLetter.Font = $script:TitleFont
+    $markLetter.ForeColor = [System.Drawing.Color]::White
+    $markLetter.BackColor = $accent
+    $markLetter.TextAlign = 'MiddleCenter'
+    $markLetter.Dock = 'Fill'
+    $mark.Controls.Add($markLetter)
     $title = New-Object System.Windows.Forms.Label
     $title.Text = $titleText
     $title.Font = $script:TitleFont
     $title.ForeColor = $ink
     $title.BackColor = $headerColor
     $title.AutoEllipsis = $true
-    $title.SetBounds(16, 12, 240, 22)
+    $title.SetBounds(60, 14, ($panelW - 108), 22)
     $identity = New-Object System.Windows.Forms.Label
     $identity.Text = ''
     $identity.Font = $script:RowBodyFont
     $identity.ForeColor = $muted
     $identity.BackColor = $headerColor
     $identity.AutoEllipsis = $true
-    $identity.SetBounds(16, 34, 250, 14)
+    $identity.SetBounds(60, 36, ($panelW - 84), 14)
     $status = New-Object System.Windows.Forms.Label
     $status.Text = 'Проверка сети'
     $status.Font = $script:RowBodyFont
     $status.ForeColor = $muted
     $status.BackColor = $headerColor
     $status.AutoEllipsis = $true
-    $status.SetBounds(16, 50, 240, 14)
+    $status.SetBounds(60, 52, ($panelW - 84), 14)
     $close = New-Object System.Windows.Forms.Button
     $close.Text = [string][char]0x00D7
-    $close.SetBounds(262, 8, 28, 24)
+    $close.SetBounds(($panelW - 40), 12, 28, 24)
     $close.FlatStyle = 'Flat'
     $close.FlatAppearance.BorderSize = 0
     $close.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(244, 244, 245)
@@ -784,24 +959,26 @@ function New-SupportPanel {
     $close.Cursor = [System.Windows.Forms.Cursors]::Hand
     $close.TabStop = $false
     $close.Add_Click({ Hide-SupportPanel })
+    $header.Controls.Add($mark)
     $header.Controls.Add($title)
     $header.Controls.Add($identity)
     $header.Controls.Add($status)
     $header.Controls.Add($close)
 
     $sheet = New-Object System.Windows.Forms.Panel
-    $sheet.SetBounds(0, 68, 300, 324)
+    $sheet.SetBounds(0, $headerH, $panelW, ($panelH - $headerH))
     $sheet.BackColor = [System.Drawing.Color]::White
-    $sheet.Region = New-Object System.Drawing.Region((New-RoundedPath -Width 300 -Height 332 -Radius 14))
 
     $ticketTab = New-Object System.Windows.Forms.Button
     $ticketTab.Text = 'Заявка'
-    $ticketTab.SetBounds(4, 2, 120, 30)
+    $ticketTab.SetBounds(8, 2, 108, 30)
+    $ticketTab.TextAlign = 'MiddleLeft'
+    $ticketTab.Padding = New-Object System.Windows.Forms.Padding(12, 0, 0, 0)
     $ticketTab.FlatStyle = 'Flat'
     $ticketTab.FlatAppearance.BorderSize = 0
     $ticketTab.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(244, 244, 245)
     $ticketTab.BackColor = [System.Drawing.Color]::White
-    $ticketTab.ForeColor = $accent
+    $ticketTab.ForeColor = $ink
     $ticketTab.Font = $script:TabFontBold
     $ticketTab.Cursor = [System.Windows.Forms.Cursors]::Hand
     $ticketTab.Add_Click({
@@ -812,7 +989,9 @@ function New-SupportPanel {
     })
     $newsTab = New-Object System.Windows.Forms.Button
     $newsTab.Text = 'Новости'
-    $newsTab.SetBounds(124, 2, 140, 30)
+    $newsTab.SetBounds(116, 2, 140, 30)
+    $newsTab.TextAlign = 'MiddleLeft'
+    $newsTab.Padding = New-Object System.Windows.Forms.Padding(16, 0, 0, 0)
     $newsTab.FlatStyle = 'Flat'
     $newsTab.FlatAppearance.BorderSize = 0
     $newsTab.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(244, 244, 245)
@@ -823,10 +1002,10 @@ function New-SupportPanel {
     $newsTab.Add_Click({ Select-SupportPage -Page News })
     $tabLine = New-Object System.Windows.Forms.Panel
     $tabLine.BackColor = $accent
-    $tabLine.SetBounds(16, 33, 44, 1)
+    $tabLine.SetBounds(20, 31, 52, 2)
 
     $newsPage = New-Object System.Windows.Forms.Panel
-    $newsPage.SetBounds(0, 36, 300, 288)
+    $newsPage.SetBounds(0, $pageY, $panelW, $pageH)
     $newsPage.Visible = $false
     $newsPage.BackColor = [System.Drawing.Color]::White
     $newsList = New-Object System.Windows.Forms.Panel
@@ -836,45 +1015,41 @@ function New-SupportPanel {
     $newsPage.Controls.Add($newsList)
 
     $ticketPage = New-Object System.Windows.Forms.Panel
-    $ticketPage.SetBounds(0, 36, 300, 288)
+    $ticketPage.SetBounds(0, $pageY, $panelW, $pageH)
     $ticketPage.BackColor = [System.Drawing.Color]::White
     $ticketPage.Visible = $true
+    $fieldW = $panelW - 32
+    $iconUser = [string][char]0xE77B
+    $iconPc = [string][char]0xE7F8
+    $iconList = [string][char]0xE8FD
+    $iconEdit = [string][char]0xE70F
+    $iconMessage = [string][char]0xE8BD
     $loginLabel = New-Object System.Windows.Forms.Label
     $loginLabel.Text = 'Логин Windows'
-    $loginLabel.ForeColor = $muted
+    $loginLabel.ForeColor = $labelColor
     $loginLabel.BackColor = [System.Drawing.Color]::White
-    $loginLabel.SetBounds(10, 4, 134, 14)
-    $loginBox = New-Object System.Windows.Forms.TextBox
-    $loginBox.ReadOnly = $true
-    $loginBox.TabStop = $false
-    $loginBox.BorderStyle = 'None'
-    $loginBox.Font = $script:RowBodyFont
-    $loginBox.ForeColor = $ink
-    $loginBox.BackColor = [System.Drawing.Color]::White
-    $loginBox.SetBounds(10, 18, 134, 22)
+    $loginLabel.SetBounds(16, 2, $fieldW, 14)
+    $loginField = New-SoftField -Kind Text -Icon $iconUser -ReadOnly -Width $fieldW -Height 40
+    $loginHost = $loginField.Shell
+    $loginBox = $loginField.Editor
     $computerLabel = New-Object System.Windows.Forms.Label
     $computerLabel.Text = 'Компьютер'
-    $computerLabel.ForeColor = $muted
+    $computerLabel.ForeColor = $labelColor
     $computerLabel.BackColor = [System.Drawing.Color]::White
-    $computerLabel.SetBounds(152, 4, 138, 14)
-    $computerBox = New-Object System.Windows.Forms.TextBox
-    $computerBox.ReadOnly = $true
-    $computerBox.TabStop = $false
-    $computerBox.BorderStyle = 'None'
-    $computerBox.Font = $script:RowBodyFont
-    $computerBox.ForeColor = $ink
-    $computerBox.BackColor = [System.Drawing.Color]::White
-    $computerBox.SetBounds(152, 18, 138, 22)
+    $computerLabel.SetBounds(16, 66, $fieldW, 14)
+    $computerField = New-SoftField -Kind Text -Icon $iconPc -ReadOnly -Width $fieldW -Height 40
+    $computerHost = $computerField.Shell
+    $computerBox = $computerField.Editor
     $projectLabel = New-Object System.Windows.Forms.Label
     $projectLabel.Text = 'Проект'
-    $projectLabel.ForeColor = $muted
+    $projectLabel.ForeColor = $labelColor
     $projectLabel.BackColor = [System.Drawing.Color]::White
     $projectLabel.Visible = $false
-    $projectLabel.SetBounds(10, 44, 280, 14)
-    $project = New-Object System.Windows.Forms.ComboBox
-    $project.DropDownStyle = 'DropDownList'
-    $project.Visible = $false
-    $project.SetBounds(10, 58, 280, 22)
+    $projectLabel.SetBounds(16, 130, $fieldW, 14)
+    $projectField = New-SoftField -Kind Combo -Icon $iconList -Width $fieldW -Height 40
+    $projectHost = $projectField.Shell
+    $projectHost.Visible = $false
+    $project = $projectField.Editor
     $project.Add_SelectedIndexChanged({
         if ($script:JiraLoading) { return }
         if (-not (Test-JiraTicketMode)) { return }
@@ -882,11 +1057,12 @@ function New-SupportPanel {
     })
     $categoryLabel = New-Object System.Windows.Forms.Label
     $categoryLabel.Text = 'Категория'
-    $categoryLabel.ForeColor = $muted
+    $categoryLabel.ForeColor = $labelColor
     $categoryLabel.BackColor = [System.Drawing.Color]::White
-    $categoryLabel.SetBounds(10, 44, 280, 14)
-    $category = New-Object System.Windows.Forms.ComboBox
-    $category.DropDownStyle = 'DropDownList'
+    $categoryLabel.SetBounds(16, 130, $fieldW, 14)
+    $categoryField = New-SoftField -Kind Combo -Icon $iconList -Width $fieldW -Height 40
+    $categoryHost = $categoryField.Shell
+    $category = $categoryField.Editor
     if (-not (Test-JiraTicketMode)) {
         foreach ($name in (Get-WebhookCategoryNames)) {
             if (-not [string]::IsNullOrWhiteSpace([string]$name)) { [void]$category.Items.Add([string]$name) }
@@ -900,38 +1076,37 @@ function New-SupportPanel {
             if ($project.Items.Count -gt 0) { $project.SelectedIndex = 0 }
         }
     }
-    $category.SetBounds(10, 58, 280, 22)
     $subjectLabel = New-Object System.Windows.Forms.Label
     $subjectLabel.Text = 'Тема'
-    $subjectLabel.ForeColor = $muted
+    $subjectLabel.ForeColor = $labelColor
     $subjectLabel.BackColor = [System.Drawing.Color]::White
-    $subjectLabel.SetBounds(10, 84, 280, 14)
-    $subject = New-Object System.Windows.Forms.TextBox
-    $subject.BorderStyle = 'FixedSingle'
-    $subject.SetBounds(10, 98, 280, 22)
+    $subjectLabel.SetBounds(16, 194, $fieldW, 14)
+    $subjectField = New-SoftField -Kind Text -Icon $iconEdit -Width $fieldW -Height 40
+    $subjectHost = $subjectField.Shell
+    $subject = $subjectField.Editor
+    Set-FieldCue -Box $subject -Cue 'Например: Не печатает принтер'
     $bodyLabel = New-Object System.Windows.Forms.Label
     $bodyLabel.Text = 'Описание'
-    $bodyLabel.ForeColor = $muted
+    $bodyLabel.ForeColor = $labelColor
     $bodyLabel.BackColor = [System.Drawing.Color]::White
-    $bodyLabel.SetBounds(10, 124, 280, 14)
-    $body = New-Object System.Windows.Forms.TextBox
-    $body.Multiline = $true
-    $body.ScrollBars = 'Vertical'
-    $body.BorderStyle = 'FixedSingle'
-    $body.SetBounds(10, 138, 280, 64)
+    $bodyLabel.SetBounds(16, 258, $fieldW, 14)
+    $bodyField = New-SoftField -Kind Note -Icon $iconMessage -Width $fieldW -Height 104
+    $bodyHost = $bodyField.Shell
+    $body = $bodyField.Editor
+    Set-FieldCue -Box $body -Cue 'Опишите суть обращения...'
     $ticketStatus = New-Object System.Windows.Forms.Label
     $ticketStatus.Text = ''
     $ticketStatus.ForeColor = $muted
     $ticketStatus.BackColor = [System.Drawing.Color]::White
-    $ticketStatus.SetBounds(10, 206, 280, 24)
-    $send = New-FlatButton -Text 'Отправить' -Location (New-Object System.Drawing.Point(10, 232)) -Size (New-Object System.Drawing.Size(280, 30))
+    $ticketStatus.SetBounds(16, 384, $fieldW, 16)
+    $send = New-FlatButton -Text 'Отправить заявку' -Location (New-Object System.Drawing.Point(16, 402)) -Size (New-Object System.Drawing.Size($fieldW, 44))
     $portalLink = New-Object System.Windows.Forms.LinkLabel
     $portalLink.Text = 'Открыть портал'
     $portalLink.LinkColor = $accent
     $portalLink.ActiveLinkColor = $accent
     $portalLink.LinkBehavior = 'HoverUnderline'
     $portalLink.BackColor = [System.Drawing.Color]::White
-    $portalLink.SetBounds(10, 266, 160, 16)
+    $portalLink.SetBounds(16, 450, 240, 16)
     $portalLink.Visible = $false
     $portalLink.Add_LinkClicked({
         $portalUrl = Get-WidgetPortalUrl
@@ -942,17 +1117,17 @@ function New-SupportPanel {
     })
     $send.Add_Click({ Submit-SupportTicket })
     $ticketPage.Controls.Add($loginLabel)
-    $ticketPage.Controls.Add($loginBox)
+    $ticketPage.Controls.Add($loginHost)
     $ticketPage.Controls.Add($computerLabel)
-    $ticketPage.Controls.Add($computerBox)
+    $ticketPage.Controls.Add($computerHost)
     $ticketPage.Controls.Add($projectLabel)
-    $ticketPage.Controls.Add($project)
+    $ticketPage.Controls.Add($projectHost)
     $ticketPage.Controls.Add($categoryLabel)
-    $ticketPage.Controls.Add($category)
+    $ticketPage.Controls.Add($categoryHost)
     $ticketPage.Controls.Add($subjectLabel)
-    $ticketPage.Controls.Add($subject)
+    $ticketPage.Controls.Add($subjectHost)
     $ticketPage.Controls.Add($bodyLabel)
-    $ticketPage.Controls.Add($body)
+    $ticketPage.Controls.Add($bodyHost)
     $ticketPage.Controls.Add($ticketStatus)
     $ticketPage.Controls.Add($send)
     $ticketPage.Controls.Add($portalLink)
@@ -964,7 +1139,7 @@ function New-SupportPanel {
     $panel.Controls.Add($header)
     $panel.Controls.Add($sheet)
     $headerRule = New-Object System.Windows.Forms.Panel
-    $headerRule.SetBounds(16, 67, 268, 1)
+    $headerRule.SetBounds(16, ($headerH - 1), ($panelW - 32), 1)
     $headerRule.BackColor = [System.Drawing.Color]::FromArgb(244, 244, 245)
     $panel.Controls.Add($headerRule)
     $panel.Add_KeyDown({
@@ -979,13 +1154,22 @@ function New-SupportPanel {
     $script:WidgetUi = @{
         Status = $status
         Identity = $identity
+        LoginLabel = $loginLabel
+        LoginHost = $loginHost
         LoginBox = $loginBox
+        ComputerLabel = $computerLabel
+        ComputerHost = $computerHost
         ComputerBox = $computerBox
         ProjectLabel = $projectLabel
+        ProjectHost = $projectHost
         ProjectBox = $project
         CategoryLabel = $categoryLabel
+        CategoryHost = $categoryHost
         SubjectLabel = $subjectLabel
+        SubjectHost = $subjectHost
         BodyLabel = $bodyLabel
+        BodyHost = $bodyHost
+        BodyField = $bodyField
         NewsTab = $newsTab
         TicketTab = $ticketTab
         TabLine = $tabLine
@@ -1190,6 +1374,9 @@ function New-DesktopWidget {
     $script:LogoFont = New-Object System.Drawing.Font('Segoe UI', 14, [System.Drawing.FontStyle]::Bold)
     $script:RowTitleFont = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
     $script:RowBodyFont = New-Object System.Drawing.Font('Segoe UI', 8)
+    $script:FieldFont = New-Object System.Drawing.Font('Segoe UI', 10)
+    $script:ButtonFont = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+    $script:IconFont = New-Object System.Drawing.Font('Segoe MDL2 Assets', 12)
     if ($script:PanelForm -and -not $script:PanelForm.IsDisposed) {
         $previousExit = $script:AllowExit
         $script:AllowExit = $true
