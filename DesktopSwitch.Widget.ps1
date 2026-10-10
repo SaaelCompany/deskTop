@@ -18,7 +18,7 @@ $script:PanelOpen = $false
 $script:PanelHiding = $false
 $script:WidgetPage = 'Ticket'
 $script:SupportPanelWidth = 360
-$script:SupportPanelHeight = 592
+$script:SupportPanelHeight = 580
 $script:NewsPopup = $null
 $script:NewsPopupBody = $null
 $script:NewsPopupTitle = $null
@@ -51,6 +51,9 @@ $script:ListRowH = 34
 $script:ListPad = 8
 $script:SendHot = $false
 $script:CloseHot = $false
+$script:DeskLayerFailed = $false
+$script:IconMissLogged = $false
+$script:ConfigFile = $null
 
 $script:DesktopHostSource = @'
 using System;
@@ -179,36 +182,258 @@ public static class DesktopHost {
 }
 '@
 
-function Initialize-DeskFrame {
-    if ('DeskFrame' -as [type]) { return $true }
+function Initialize-DeskLayer {
+    if ('DeskLayer' -as [type]) { return $true }
+    if ($script:DeskLayerFailed) { return $false }
     $source = @'
 using System;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.IO;
 using System.Runtime.InteropServices;
-public static class DeskFrame {
-    [DllImport("dwmapi.dll")]
-    static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
-    public static bool Round(IntPtr hwnd) {
+using System.Windows.Forms;
+
+public static class DeskLayer {
+    [StructLayout(LayoutKind.Sequential)]
+    struct POINT { public int X; public int Y; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct SIZE { public int cx; public int cy; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct BLENDFUNCTION {
+        public byte BlendOp;
+        public byte BlendFlags;
+        public byte SourceConstantAlpha;
+        public byte AlphaFormat;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    struct BITMAPINFOHEADER {
+        public int biSize;
+        public int biWidth;
+        public int biHeight;
+        public short biPlanes;
+        public short biBitCount;
+        public int biCompression;
+        public int biSizeImage;
+        public int biXPelsPerMeter;
+        public int biYPelsPerMeter;
+        public int biClrUsed;
+        public int biClrImportant;
+    }
+    [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
+    static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLong")]
+    static extern int SetWindowLong32(IntPtr hWnd, int nIndex, int dwNewLong);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr")]
+    static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtr")]
+    static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFOHEADER bmi, uint usage, out IntPtr bits, IntPtr section, uint offset);
+    [DllImport("user32.dll")] static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize, IntPtr hdcSrc, ref POINT pptSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
+    [DllImport("kernel32.dll", EntryPoint = "RtlMoveMemory")]
+    static extern void CopyMemory(IntPtr dest, IntPtr src, uint length);
+
+    static void SetLayered(IntPtr hwnd, bool on) {
+        const int GWL_EXSTYLE = -20;
+        const int WS_EX_LAYERED = 0x80000;
+        if (IntPtr.Size == 8) {
+            long style = GetWindowLongPtr64(hwnd, GWL_EXSTYLE).ToInt64();
+            if (on) style |= WS_EX_LAYERED;
+            else style &= ~WS_EX_LAYERED;
+            SetWindowLongPtr64(hwnd, GWL_EXSTYLE, new IntPtr(style));
+        } else {
+            int style = GetWindowLong32(hwnd, GWL_EXSTYLE);
+            if (on) style |= WS_EX_LAYERED;
+            else style &= ~WS_EX_LAYERED;
+            SetWindowLong32(hwnd, GWL_EXSTYLE, style);
+        }
+    }
+
+    static GraphicsPath RoundRect(float x, float y, float w, float h, float r) {
+        GraphicsPath path = new GraphicsPath();
+        float d = r * 2f;
+        if (d > w) d = w;
+        if (d > h) d = h;
+        path.AddArc(x, y, d, d, 180, 90);
+        path.AddArc(x + w - d, y, d, d, 270, 90);
+        path.AddArc(x + w - d, y + h - d, d, d, 0, 90);
+        path.AddArc(x, y + h - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
+    public static bool ShowLauncher(IntPtr hwnd, int fillArgb, int x, int y, bool open, int badge, string iconPath) {
         if (hwnd == IntPtr.Zero) return false;
-        int pref = 2;
-        return DwmSetWindowAttribute(hwnd, 33, ref pref, 4) == 0;
+        const int size = 52;
+        Bitmap bmp = new Bitmap(size, size, PixelFormat.Format32bppPArgb);
+        using (Graphics g = Graphics.FromImage(bmp)) {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.Clear(Color.Transparent);
+            Color fill = Color.FromArgb(fillArgb);
+            using (SolidBrush brush = new SolidBrush(fill)) {
+                g.FillEllipse(brush, 0.5f, 0.5f, 51f, 51f);
+            }
+            bool drewIcon = false;
+            if (!open && !string.IsNullOrEmpty(iconPath) && File.Exists(iconPath)) {
+                try {
+                    using (FileStream stream = new FileStream(iconPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (Image image = Image.FromStream(stream)) {
+                        g.SetClip(new Rectangle(0, 0, size, size));
+                        using (GraphicsPath clip = new GraphicsPath()) {
+                            clip.AddEllipse(6, 6, 40, 40);
+                            g.SetClip(clip);
+                        }
+                        g.DrawImage(image, new Rectangle(8, 8, 36, 36));
+                        g.ResetClip();
+                        drewIcon = true;
+                    }
+                } catch {
+                    drewIcon = false;
+                }
+            }
+            if (!drewIcon) {
+                using (Pen pen = new Pen(Color.White, 1.7f)) {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Round;
+                    pen.LineJoin = LineJoin.Round;
+                    if (open) {
+                        g.DrawLine(pen, 19.5f, 19.5f, 32.5f, 32.5f);
+                        g.DrawLine(pen, 32.5f, 19.5f, 19.5f, 32.5f);
+                    } else {
+                        using (GraphicsPath bubble = RoundRect(15, 16, 22, 16, 7)) {
+                            g.DrawPath(pen, bubble);
+                        }
+                        g.DrawLine(pen, 22, 31, 19, 36);
+                        g.DrawLine(pen, 19, 36, 27, 31);
+                    }
+                }
+            }
+            if (badge > 0) {
+                using (SolidBrush white = new SolidBrush(Color.White)) g.FillEllipse(white, 32, 2, 16, 16);
+                string text = badge > 9 ? "9" : badge.ToString();
+                using (Font font = new Font("Segoe UI", 7f, FontStyle.Bold, GraphicsUnit.Point)) {
+                    TextRenderer.DrawText(g, text, font, new Rectangle(32, 2, 16, 16), fill,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+                }
+            }
+        }
+        IntPtr screen = GetDC(IntPtr.Zero);
+        IntPtr mem = CreateCompatibleDC(screen);
+        BITMAPINFOHEADER info = new BITMAPINFOHEADER();
+        info.biSize = 40;
+        info.biWidth = size;
+        info.biHeight = -size;
+        info.biPlanes = 1;
+        info.biBitCount = 32;
+        IntPtr bits;
+        IntPtr dib = CreateDIBSection(screen, ref info, 0, out bits, IntPtr.Zero, 0);
+        bool ok = false;
+        try {
+            BitmapData src = bmp.LockBits(new Rectangle(0, 0, size, size), ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
+            int stride = src.Stride;
+            int abs = stride < 0 ? -stride : stride;
+            for (int row = 0; row < size; row++) {
+                long from = src.Scan0.ToInt64() + (stride > 0 ? row * stride : (size - 1 - row) * abs);
+                long to = bits.ToInt64() + (row * size * 4);
+                CopyMemory(new IntPtr(to), new IntPtr(from), (uint)(size * 4));
+            }
+            bmp.UnlockBits(src);
+            IntPtr old = SelectObject(mem, dib);
+            SetLayered(hwnd, true);
+            POINT dst = new POINT();
+            dst.X = x;
+            dst.Y = y;
+            SIZE dim = new SIZE();
+            dim.cx = size;
+            dim.cy = size;
+            POINT srcPt = new POINT();
+            BLENDFUNCTION blend = new BLENDFUNCTION();
+            blend.BlendOp = 0;
+            blend.SourceConstantAlpha = 255;
+            blend.AlphaFormat = 1;
+            ok = UpdateLayeredWindow(hwnd, screen, ref dst, ref dim, mem, ref srcPt, 0, ref blend, 2);
+            SelectObject(mem, old);
+            if (!ok) SetLayered(hwnd, false);
+        } finally {
+            if (dib != IntPtr.Zero) DeleteObject(dib);
+            DeleteDC(mem);
+            ReleaseDC(IntPtr.Zero, screen);
+            bmp.Dispose();
+        }
+        return ok;
     }
 }
 '@
     try {
-        Add-Type -TypeDefinition $source -ErrorAction Stop
+        Add-Type -TypeDefinition $source -ReferencedAssemblies System.Drawing, System.Windows.Forms -ErrorAction Stop
         return $true
     } catch {
+        $script:DeskLayerFailed = $true
         return $false
     }
 }
 
-function Enable-SmoothFrame {
-    param($Form)
-    if ($null -eq $Form -or $Form.IsDisposed -or -not $Form.IsHandleCreated) { return }
-    if (-not (Initialize-DeskFrame)) { return }
-    $rounded = $false
-    try { $rounded = [DeskFrame]::Round($Form.Handle) } catch { $rounded = $false }
-    if ($rounded) { $Form.Region = $null }
+function Resolve-WidgetIconPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+    $clean = $Path.Trim().Trim('"')
+    if ([System.IO.Path]::IsPathRooted($clean)) {
+        if (Test-Path -LiteralPath $clean) { return (Resolve-Path -LiteralPath $clean).Path }
+        return ''
+    }
+    $roots = New-Object System.Collections.Generic.List[string]
+    if ($script:ConfigFile) {
+        $parent = Split-Path -Parent ([string]$script:ConfigFile)
+        if (-not [string]::IsNullOrWhiteSpace($parent)) { $roots.Add($parent) }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) { $roots.Add($PSScriptRoot) }
+    foreach ($root in $roots) {
+        $full = Join-Path $root $clean
+        if (Test-Path -LiteralPath $full) { return (Resolve-Path -LiteralPath $full).Path }
+    }
+    return ''
+}
+
+function Update-LauncherSurface {
+    $form = $script:WidgetForm
+    if ($null -eq $form -or $form.IsDisposed) { return }
+    if (-not $form.IsHandleCreated) { return }
+    $color = Get-ThemeColor Accent
+    if ($script:LauncherHot) { $color = Get-ThemeColor AccentHover }
+    $icon = ''
+    if ($script:Cfg -and -not [string]::IsNullOrWhiteSpace([string]$script:Cfg.WidgetIcon)) {
+        $icon = Resolve-WidgetIconPath ([string]$script:Cfg.WidgetIcon)
+        if ([string]::IsNullOrWhiteSpace($icon) -and -not $script:IconMissLogged) {
+            $script:IconMissLogged = $true
+            Write-Log ("Файл иконки не найден: {0}" -f [string]$script:Cfg.WidgetIcon) 'WARN'
+        }
+    }
+    $layered = $false
+    if (Initialize-DeskLayer) {
+        try {
+            $badge = 0
+            try { $badge = [int](Get-UnopenedNoticeCount) } catch { $badge = 0 }
+            $form.Region = $null
+            $layered = [bool]([DeskLayer]::ShowLauncher($form.Handle, $color.ToArgb(), $form.Left, $form.Top, [bool]$script:PanelOpen, $badge, $icon))
+        } catch {
+            $layered = $false
+        }
+    }
+    if ($layered) { return }
+    if ($null -eq $form.Region) {
+        $circle = New-Object System.Drawing.Drawing2D.GraphicsPath
+        $circle.AddEllipse(0, 0, 52, 52)
+        $form.Region = New-Object System.Drawing.Region($circle)
+        $circle.Dispose()
+    }
+    $form.Invalidate()
 }
 
 function Initialize-DesktopHost {
@@ -353,7 +578,6 @@ function Apply-NewsPopupPalette {
     $canvas = Get-ThemeColor Canvas
     $ink = Get-ThemeColor Ink
     $muted = Get-ThemeColor Muted
-    $hover = Get-ThemeColor Hover
     $rule = Get-ThemeColor Rule
     $script:NewsPopup.BackColor = $canvas
     if ($script:NewsPopupHeader) { $script:NewsPopupHeader.BackColor = $canvas }
@@ -364,7 +588,6 @@ function Apply-NewsPopupPalette {
     if ($script:NewsPopupClose) {
         $script:NewsPopupClose.BackColor = $canvas
         $script:NewsPopupClose.ForeColor = $muted
-        $script:NewsPopupClose.FlatAppearance.MouseOverBackColor = $hover
     }
     if ($script:NewsPopupRule) { $script:NewsPopupRule.BackColor = $rule }
     if ($script:NewsPopupBody) { $script:NewsPopupBody.BackColor = $canvas }
@@ -391,8 +614,8 @@ function Apply-WidgetPalette {
     $ui.Identity.BackColor = $canvas
     $ui.Status.BackColor = $canvas
     $ui.CloseButton.BackColor = $canvas
+    $ui.CloseButton.ForeColor = $muted
     if ($ui.CloseButton -is [System.Windows.Forms.Button]) {
-        $ui.CloseButton.ForeColor = $muted
         $ui.CloseButton.FlatAppearance.MouseOverBackColor = $hover
     }
     $ui.CloseButton.Invalidate()
@@ -434,7 +657,7 @@ function Apply-WidgetPalette {
     $script:NewsSignature = Get-NewsSignature
     Apply-NewsPopupPalette
     Apply-TrayMenuPalette
-    if ($script:WidgetForm -and -not $script:WidgetForm.IsDisposed) { $script:WidgetForm.Invalidate() }
+    if ($script:WidgetForm -and -not $script:WidgetForm.IsDisposed) { Update-LauncherSurface }
 }
 
 function Sync-WidgetTheme {
@@ -490,6 +713,7 @@ function Set-LauncherChrome {
     if ('DesktopHost' -as [type] -and $launcher.IsHandleCreated) {
         try { [DesktopHost]::PrepareLauncher($launcher.Handle) } catch { }
     }
+    Update-LauncherSurface
 }
 
 function Format-NoticeStamp {
@@ -650,11 +874,12 @@ function New-FlatButton {
         $g.ResetTransform()
         $font = $box.Font
         $label = [string]$box.Text
-        $measured = $g.MeasureString($label, $font)
+        $flags = [System.Windows.Forms.TextFormatFlags]::NoPadding -bor [System.Windows.Forms.TextFormatFlags]::SingleLine -bor [System.Windows.Forms.TextFormatFlags]::VerticalCenter
+        $measured = [System.Windows.Forms.TextRenderer]::MeasureText($g, $label, $font, (New-Object System.Drawing.Size(1000, $box.Height)), $flags)
         $icon = 14
         $gap = 8
         $total = $icon + $gap + $measured.Width
-        $x = ($box.Width - $total) / 2
+        $x = [int](($box.Width - $total) / 2)
         if ($x -lt 8) { $x = 8 }
         $mid = $box.Height / 2
         $textBrush = New-Object System.Drawing.SolidBrush $ink
@@ -666,8 +891,9 @@ function New-FlatButton {
         $points[2] = New-Object System.Drawing.PointF(($ox + 7.5), ($oy + 12.5))
         $points[3] = New-Object System.Drawing.PointF(($ox + 6), ($oy + 7))
         $g.FillPolygon($textBrush, $points)
-        $g.DrawString($label, $font, $textBrush, ($x + $icon + $gap), ($mid - ($measured.Height / 2) - 1))
         $textBrush.Dispose()
+        $textRect = New-Object System.Drawing.Rectangle(($x + $icon + $gap), 0, ($measured.Width + 4), $box.Height)
+        [System.Windows.Forms.TextRenderer]::DrawText($g, $label, $font, $textRect, $ink, $flags)
     })
     return $button
 }
@@ -809,8 +1035,8 @@ function Update-SoftListRows {
         $row.Tag = $index
         $row.SetBounds(8, ($pad + ($i * $rowH) + 2), ($popupW - 20), ($rowH - 4))
         if ($index -eq $list.SelectedIndex) {
-            $row.BackColor = Get-ThemeColor Accent
-            $row.ForeColor = [System.Drawing.Color]::White
+            $row.BackColor = Get-ThemeColor Selection
+            $row.ForeColor = Get-ThemeColor Ink
         } else {
             $row.BackColor = Get-ThemeColor FieldFill
             $row.ForeColor = Get-ThemeColor Ink
@@ -917,10 +1143,7 @@ function Show-SoftListPopup {
         $g.FillRectangle($brush, ($this.Width - 7), $y, 3, $thumbH)
         $brush.Dispose()
     })
-    $form.Add_Shown({
-        $script:ListPopupReady = $true
-        Enable-SmoothFrame $script:ListPopup
-    })
+    $form.Add_Shown({ $script:ListPopupReady = $true })
     $form.Add_Deactivate({
         if (-not $script:ListPopupReady) { return }
         Close-SoftListPopup
@@ -1359,8 +1582,8 @@ function Select-SupportPage {
     Apply-SupportPageVisual -Page $Page
     if ($script:PanelOpen -and $script:WidgetPage -eq 'News') {
         Mark-NoticesOpened
-        if ($script:WidgetForm -and -not $script:WidgetForm.IsDisposed) { $script:WidgetForm.Invalidate() }
     }
+    Update-LauncherSurface
 }
 
 function Update-WidgetChrome {
@@ -1373,12 +1596,8 @@ function Update-WidgetChrome {
     $session = Get-WindowsSessionIdentity
     $login = Format-WindowsAccount ([string]$session.Login)
     $computer = [string]$session.Computer
-    $identity = $login
-    if (-not [string]::IsNullOrWhiteSpace($computer)) {
-        if ([string]::IsNullOrWhiteSpace($identity)) { $identity = $computer }
-        else { $identity = ('{0}  ·  {1}' -f $login, $computer) }
-    }
-    $ui.Identity.Text = $identity
+    $ui.Identity.Text = ''
+    $ui.Identity.Visible = $false
     $ui.LoginBox.Text = $login
     $ui.ComputerBox.Text = $computer
     $count = @($script:NewsItems | Where-Object { $null -ne $_ }).Count
@@ -1391,7 +1610,7 @@ function Update-WidgetChrome {
     }
     Update-TicketActions
     Set-SupportBounds
-    $script:WidgetForm.Invalidate()
+    Update-LauncherSurface
 }
 
 function Update-WidgetStatus {
@@ -1406,7 +1625,7 @@ function Hide-SupportPanel {
         if ($script:PanelForm -and -not $script:PanelForm.IsDisposed -and $script:PanelForm.Visible) {
             $script:PanelForm.Hide()
         }
-        if ($script:WidgetForm -and -not $script:WidgetForm.IsDisposed) { $script:WidgetForm.Invalidate() }
+        Update-LauncherSurface
     } finally {
         $script:PanelHiding = $false
     }
@@ -1422,11 +1641,10 @@ function Show-SupportPanel {
     Set-SupportBounds
     if (-not $script:PanelForm.Visible) { $script:PanelForm.Show() }
     try { $script:PanelForm.Activate() } catch { }
-    Enable-SmoothFrame $script:PanelForm
     if ('DesktopHost' -as [type]) {
         try { [DesktopHost]::PreparePanel($script:PanelForm.Handle) } catch { }
     }
-    if ($script:WidgetForm -and -not $script:WidgetForm.IsDisposed) { $script:WidgetForm.Invalidate() }
+    Update-LauncherSurface
     if ($script:WidgetPage -eq 'Ticket' -and $script:PanelForm -and -not $script:PanelForm.IsDisposed) {
         $script:PanelForm.BeginInvoke([System.Action]{ Request-JiraCatalogIfTicket }) | Out-Null
     }
@@ -1452,22 +1670,50 @@ function New-LauncherButton {
         $fill = Get-ThemeColor Accent
         if ($script:LauncherHot) { $fill = Get-ThemeColor AccentHover }
         $brush = New-Object System.Drawing.SolidBrush $fill
-        $g.FillEllipse($brush, 1, 1, 50, 50)
+        $g.FillEllipse($brush, 0, 0, 51, 51)
         $brush.Dispose()
-        $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White, 1.6)
-        if ($script:PanelOpen) {
-            $g.DrawLine($pen, 19, 19, 33, 33)
-            $g.DrawLine($pen, 33, 19, 19, 33)
-        } else {
-            $bubble = New-RoundedPath -Width 22 -Height 16 -Radius 7
-            $g.TranslateTransform(15, 16)
-            $g.DrawPath($pen, $bubble)
-            $g.ResetTransform()
-            $bubble.Dispose()
-            $g.DrawLine($pen, 22, 31, 19, 36)
-            $g.DrawLine($pen, 19, 36, 27, 31)
+        $drewIcon = $false
+        if (-not $script:PanelOpen -and $script:Cfg -and -not [string]::IsNullOrWhiteSpace([string]$script:Cfg.WidgetIcon)) {
+            $iconPath = Resolve-WidgetIconPath ([string]$script:Cfg.WidgetIcon)
+            if (-not [string]::IsNullOrWhiteSpace($iconPath)) {
+                $stream = $null
+                $image = $null
+                try {
+                    $stream = New-Object System.IO.FileStream($iconPath, 'Open', 'Read', 'ReadWrite')
+                    $image = [System.Drawing.Image]::FromStream($stream)
+                    $clip = New-Object System.Drawing.Drawing2D.GraphicsPath
+                    $clip.AddEllipse(6, 6, 40, 40)
+                    $g.SetClip($clip)
+                    $g.DrawImage($image, (New-Object System.Drawing.Rectangle(8, 8, 36, 36)))
+                    $g.ResetClip()
+                    $clip.Dispose()
+                    $drewIcon = $true
+                } catch {
+                    $drewIcon = $false
+                } finally {
+                    if ($null -ne $image) { $image.Dispose() }
+                    if ($null -ne $stream) { $stream.Dispose() }
+                }
+            }
         }
-        $pen.Dispose()
+        if (-not $drewIcon) {
+            $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White, 1.6)
+            $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+            $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+            if ($script:PanelOpen) {
+                $g.DrawLine($pen, 19.5, 19.5, 32.5, 32.5)
+                $g.DrawLine($pen, 32.5, 19.5, 19.5, 32.5)
+            } else {
+                $bubble = New-RoundedPath -Width 22 -Height 16 -Radius 7
+                $g.TranslateTransform(15, 16)
+                $g.DrawPath($pen, $bubble)
+                $g.ResetTransform()
+                $bubble.Dispose()
+                $g.DrawLine($pen, 22, 31, 19, 36)
+                $g.DrawLine($pen, 19, 36, 27, 31)
+            }
+            $pen.Dispose()
+        }
         $count = Get-UnopenedNoticeCount
         if ($count -gt 0) {
             $badge = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
@@ -1476,19 +1722,13 @@ function New-LauncherButton {
             $text = [string]$count
             if ($count -gt 9) { $text = '9' }
             $font = New-Object System.Drawing.Font('Segoe UI', 7, [System.Drawing.FontStyle]::Bold)
-            $format = New-Object System.Drawing.StringFormat
-            $format.Alignment = [System.Drawing.StringAlignment]::Center
-            $format.LineAlignment = [System.Drawing.StringAlignment]::Center
-            $ink = New-Object System.Drawing.SolidBrush (Get-ThemeColor Accent)
-            $rect = New-Object System.Drawing.RectangleF(32, 2, 16, 16)
-            $g.DrawString($text, $font, $ink, $rect, $format)
-            $ink.Dispose()
+            $flags = [System.Windows.Forms.TextFormatFlags]::HorizontalCenter -bor [System.Windows.Forms.TextFormatFlags]::VerticalCenter -bor [System.Windows.Forms.TextFormatFlags]::NoPadding -bor [System.Windows.Forms.TextFormatFlags]::SingleLine
+            [System.Windows.Forms.TextRenderer]::DrawText($g, $text, $font, (New-Object System.Drawing.Rectangle(32, 2, 16, 16)), (Get-ThemeColor Accent), $flags)
             $font.Dispose()
-            $format.Dispose()
         }
     })
-    $form.Add_MouseEnter({ $script:LauncherHot = $true; if ($script:WidgetForm) { $script:WidgetForm.Invalidate() } })
-    $form.Add_MouseLeave({ $script:LauncherHot = $false; if ($script:WidgetForm) { $script:WidgetForm.Invalidate() } })
+    $form.Add_MouseEnter({ $script:LauncherHot = $true; Update-LauncherSurface })
+    $form.Add_MouseLeave({ $script:LauncherHot = $false; Update-LauncherSurface })
     $form.Add_Click({
         $now = Get-Date
         if (($now - $script:LauncherClickAt).TotalMilliseconds -lt 280) { return }
@@ -1516,7 +1756,7 @@ function New-SupportPanel {
     $ruleColor = Get-ThemeColor Rule
     $panelW = [int]$script:SupportPanelWidth
     $panelH = [int]$script:SupportPanelHeight
-    $headerH = 76
+    $headerH = 64
     $pageY = 34
     $pageH = $panelH - $headerH - $pageY
     $panel = New-Object System.Windows.Forms.Form
@@ -1539,7 +1779,7 @@ function New-SupportPanel {
     $trimmedTitle = $titleText.Trim()
     if ($trimmedTitle.Length -gt 0) { $markText = $trimmedTitle.Substring(0, 1).ToUpper() }
     $mark = New-Object System.Windows.Forms.Panel
-    $mark.SetBounds(16, 20, 36, 36)
+    $mark.SetBounds(16, 14, 36, 36)
     $mark.BackColor = $headerColor
     $mark.Text = $markText
     $mark.Font = $script:LogoFont
@@ -1557,15 +1797,8 @@ function New-SupportPanel {
         $brush.Dispose()
         $path.Dispose()
         $g.ResetTransform()
-        $font = $box.Font
-        $format = New-Object System.Drawing.StringFormat
-        $format.Alignment = [System.Drawing.StringAlignment]::Center
-        $format.LineAlignment = [System.Drawing.StringAlignment]::Center
-        $ink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
-        $rect = New-Object System.Drawing.RectangleF(1, 2, 34, 32)
-        $g.DrawString([string]$box.Text, $font, $ink, $rect, $format)
-        $ink.Dispose()
-        $format.Dispose()
+        $flags = [System.Windows.Forms.TextFormatFlags]::HorizontalCenter -bor [System.Windows.Forms.TextFormatFlags]::VerticalCenter -bor [System.Windows.Forms.TextFormatFlags]::NoPadding -bor [System.Windows.Forms.TextFormatFlags]::SingleLine
+        [System.Windows.Forms.TextRenderer]::DrawText($g, [string]$box.Text, $box.Font, (New-Object System.Drawing.Rectangle(1, 1, 34, 34)), [System.Drawing.Color]::White, $flags)
     })
     $title = New-Object System.Windows.Forms.Label
     $title.Text = $titleText
@@ -1573,46 +1806,31 @@ function New-SupportPanel {
     $title.ForeColor = $ink
     $title.BackColor = $headerColor
     $title.AutoEllipsis = $true
-    $title.SetBounds(60, 14, ($panelW - 108), 22)
+    $title.SetBounds(60, 14, ($panelW - 120), 22)
     $identity = New-Object System.Windows.Forms.Label
     $identity.Text = ''
+    $identity.Visible = $false
     $identity.Font = $script:RowBodyFont
     $identity.ForeColor = $muted
     $identity.BackColor = $headerColor
-    $identity.AutoEllipsis = $true
-    $identity.SetBounds(60, 36, ($panelW - 84), 14)
     $status = New-Object System.Windows.Forms.Label
     $status.Text = 'Проверка сети'
     $status.Font = $script:RowBodyFont
     $status.ForeColor = $muted
     $status.BackColor = $headerColor
     $status.AutoEllipsis = $true
-    $status.SetBounds(60, 52, ($panelW - 84), 14)
-    $close = New-Object System.Windows.Forms.Panel
-    $close.SetBounds(($panelW - 48), 18, 28, 28)
+    $status.SetBounds(60, 36, ($panelW - 120), 16)
+    $close = New-Object System.Windows.Forms.Label
+    $close.Text = [string][char]0xE711
+    $close.Font = $script:IconFont
+    $close.TextAlign = 'MiddleCenter'
+    $close.ForeColor = $muted
     $close.BackColor = $headerColor
     $close.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $close.Add_MouseEnter({ $script:CloseHot = $true; $this.Invalidate() })
-    $close.Add_MouseLeave({ $script:CloseHot = $false; $this.Invalidate() })
+    $close.SetBounds(($panelW - 52), 16, 32, 32)
+    $close.Add_MouseEnter({ $this.ForeColor = Get-ThemeColor Ink })
+    $close.Add_MouseLeave({ $this.ForeColor = Get-ThemeColor Muted })
     $close.Add_Click({ Hide-SupportPanel })
-    $close.Add_Paint({
-        $box = $this
-        $g = $_.Graphics
-        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-        $g.Clear($box.BackColor)
-        if ($script:CloseHot) {
-            $hot = New-Object System.Drawing.SolidBrush (Get-ThemeColor Hover)
-            $g.FillEllipse($hot, 1, 1, 26, 26)
-            $hot.Dispose()
-        }
-        $pen = New-Object System.Drawing.Pen (Get-ThemeColor Muted), 1.6
-        $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-        $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-        $g.DrawLine($pen, 9, 9, 19, 19)
-        $g.DrawLine($pen, 19, 9, 9, 19)
-        $pen.Dispose()
-    })
     $header.Controls.Add($mark)
     $header.Controls.Add($title)
     $header.Controls.Add($identity)
@@ -1762,7 +1980,7 @@ function New-SupportPanel {
     $portalLink.BackColor = $headerColor
     $portalLink.AutoSize = $false
     $portalLink.TextAlign = 'MiddleCenter'
-    $portalLink.UseCompatibleTextRendering = $true
+    $portalLink.UseCompatibleTextRendering = $false
     $portalLink.SetBounds(16, 450, $fieldW, 22)
     $portalLink.Visible = $false
     $portalLink.Add_LinkClicked({
@@ -2207,7 +2425,6 @@ function Ensure-NewsPopup {
     $ink = Get-ThemeColor Ink
     $muted = Get-ThemeColor Muted
     $canvas = Get-ThemeColor Canvas
-    $hover = Get-ThemeColor Hover
     $ruleColor = Get-ThemeColor Rule
     $form = New-Object System.Windows.Forms.Form
     $form.FormBorderStyle = 'None'
@@ -2229,17 +2446,16 @@ function Ensure-NewsPopup {
     $title.AutoEllipsis = $true
     $title.SetBounds(12, 8, 220, 20)
     $title.Add_Click({ Open-NewsFromPopup })
-    $close = New-Object System.Windows.Forms.Button
-    $close.Text = [string][char]0x00D7
-    $close.SetBounds(244, 4, 28, 26)
-    $close.FlatStyle = 'Flat'
-    $close.FlatAppearance.BorderSize = 0
-    $close.FlatAppearance.MouseOverBackColor = $hover
+    $close = New-Object System.Windows.Forms.Label
+    $close.Text = [string][char]0xE711
+    $close.SetBounds(244, 2, 32, 32)
+    $close.TextAlign = 'MiddleCenter'
     $close.BackColor = $canvas
     $close.ForeColor = $muted
-    $close.Font = $script:TitleFont
+    $close.Font = $script:IconFont
     $close.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $close.TabStop = $false
+    $close.Add_MouseEnter({ $this.ForeColor = Get-ThemeColor Ink })
+    $close.Add_MouseLeave({ $this.ForeColor = Get-ThemeColor Muted })
     $close.Add_Click({ Hide-NewsPopup })
     $headerRule = New-Object System.Windows.Forms.Panel
     $headerRule.SetBounds(12, 35, 256, 1)

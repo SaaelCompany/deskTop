@@ -51,6 +51,7 @@ function Get-WidgetPalette {
             FieldReadOnly = @(248, 250, 252)
             Icon = @(148, 163, 184)
             Hover = @(244, 244, 245)
+            Selection = @(232, 240, 255)
             Rule = @(244, 244, 245)
             Accent = @(47, 107, 255)
             AccentHover = @(37, 90, 230)
@@ -74,6 +75,7 @@ function Get-WidgetPalette {
         FieldReadOnly = @(28, 28, 32)
         Icon = @(148, 163, 184)
         Hover = @(48, 48, 54)
+        Selection = @(46, 58, 82)
         Rule = @(63, 63, 70)
         Accent = @(47, 107, 255)
         AccentHover = @(37, 90, 230)
@@ -280,6 +282,7 @@ function Get-EffectiveDesktopConfig {
         MaxLogBytes = Get-ClampedLogBytes (ConvertTo-Int (Get-Prop $Config 'MaxLogBytes' 1048576) 1048576)
         WidgetEnabled = ConvertTo-Bool (Get-Prop $widget 'Enabled' $true) $true
         WidgetTitle = ([string](Get-Prop $widget 'Title' 'Сервисная служба')).Trim()
+        WidgetIcon = ([string](Get-Prop $widget 'Icon' '')).Trim()
         WidgetCorner = $cornerMap[$cornerKey]
         WidgetMargin = Get-ClampedMargin (ConvertTo-Int (Get-Prop $widget 'Margin' 16) 16)
         ServiceDeskUrl = $serviceDeskUrl

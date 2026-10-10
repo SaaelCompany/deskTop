@@ -356,6 +356,10 @@ $darkPalette = Get-WidgetPalette -Light $false
 Assert-Equal 'light card' $lightPalette.Canvas[0] 255
 Assert-True 'dark card' ($darkPalette.Canvas[0] -lt 80)
 Assert-Equal 'shared accent' $lightPalette.Accent[0] $darkPalette.Accent[0]
+Assert-True 'dark selection is quiet' ($darkPalette.Selection[1] -lt 90)
+Assert-Equal 'icon empty by default' $widgetCfg.WidgetIcon ''
+$iconCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ Icon = ' icons\chat.png ' } })
+Assert-Equal 'icon path trimmed' $iconCfg.WidgetIcon 'icons\chat.png'
 Assert-Equal 'jira off by default' $widgetCfg.JiraBaseUrl ''
 Assert-Equal 'desk off without urls' $widgetCfg.ServiceDeskProvider 'None'
 Assert-Equal 'default category count' $widgetCfg.ServiceDeskCategories.Count 3
