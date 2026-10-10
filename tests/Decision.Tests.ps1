@@ -153,7 +153,8 @@ Assert-Equal 'mode other local' (Get-DesktopModeFromPath -CurrentPath 'D:\Desk' 
 Assert-Equal 'mode empty' (Get-DesktopModeFromPath -CurrentPath '' -NetworkPath '\\fs\share\Desktop' -LocalPath 'C:\Cache') 'Network'
 
 Assert-Equal 'configured path wins' (Resolve-NetworkPathValue -Configured '\\fs\share\Desktop' -Learned '\\old\share' -Current '\\current\share') '\\fs\share\Desktop'
-Assert-Equal 'learned path second' (Resolve-NetworkPathValue -Configured '' -Learned '\\old\share\Desktop' -Current '\\current\share') '\\old\share\Desktop'
+Assert-Equal 'live policy path wins' (Resolve-NetworkPathValue -Configured '' -Learned '\\old\share\Desktop' -Current '\\current\share\Desktop') '\\current\share\Desktop'
+Assert-Equal 'learned path while local' (Resolve-NetworkPathValue -Configured '' -Learned '\\old\share\Desktop' -Current 'C:\Users\Desktop') '\\old\share\Desktop'
 Assert-Equal 'current unc last' (Resolve-NetworkPathValue -Configured 'not-a-path' -Learned '' -Current '\\current\share\Desktop') '\\current\share\Desktop'
 Assert-Equal 'nothing found' (Resolve-NetworkPathValue -Configured '' -Learned '' -Current 'C:\Users\Desktop') ''
 
@@ -234,10 +235,12 @@ $root = Split-Path $PSScriptRoot -Parent
 $example = Get-Content -LiteralPath (Join-Path $root 'config.example.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $exampleConfig = Get-EffectiveDesktopConfig $example
 Assert-Equal 'example stays disabled' $exampleConfig.Enabled $false
-$exampleErrors = Get-DesktopConfigErrors -NetworkPath $exampleConfig.NetworkDesktopPath -LocalPath $exampleConfig.LocalDesktopPath
-$exampleText = [string]::Join("`n", @($exampleErrors))
-Assert-Equal 'example has one error' $exampleErrors.Count 1
-Assert-Contains 'example names the placeholder' $exampleText 'CHANGE-ME'
+Assert-Equal 'example follows policy' $exampleConfig.NetworkDesktopPath ''
+Assert-Equal 'example widget on' $exampleConfig.WidgetEnabled $true
+$exampleErrors = Get-DesktopConfigErrors -NetworkPath $exampleConfig.NetworkDesktopPath -LocalPath $exampleConfig.LocalDesktopPath -AllowEmptyNetwork
+Assert-Equal 'example has no path error' $exampleErrors.Count 0
+$placeholderErrors = Get-DesktopConfigErrors -NetworkPath '\\CHANGE-ME\DesktopShare\Desktop' -LocalPath $exampleConfig.LocalDesktopPath
+Assert-Contains 'placeholder still rejected' ([string]::Join("`n", @($placeholderErrors))) 'CHANGE-ME'
 
 $validErrors = Get-DesktopConfigErrors -NetworkPath '\\fs01\Desktop\Common' -LocalPath 'C:\Users\TestUser\AppData\Local\DesktopSwitch\LocalDesktop'
 Assert-Equal 'valid pair' $validErrors.Count 0
@@ -252,7 +255,61 @@ Assert-Equal 'empty network allowed' $emptyErrors.Count 0
 $emptyDenied = Get-DesktopConfigErrors -NetworkPath '' -LocalPath 'C:\Cache'
 Assert-Contains 'empty network explained' ([string]::Join("`n", @($emptyDenied))) 'NetworkDesktopPath'
 
-foreach ($name in @('DesktopSwitch.Logic.ps1', 'DesktopSwitch.ps1', 'Install-DesktopSwitch.ps1', 'Uninstall-DesktopSwitch.ps1')) {
+$feedJson = @'
+{"items":[
+  {"id":"n1","title":"Новый принтер","body":"На 3 этаже","kind":"news","publishedAt":"2026-10-01T10:00:00","url":"https://intranet.example/n1"},
+  {"id":"m1","title":"Окно обслуживания","body":"Сервер с 22:00","kind":"maintenance","publishedAt":"2026-10-10T09:00:00"}
+]}
+'@
+$feed = @(Sort-Notices (ConvertFrom-NewsFeed $feedJson))
+Assert-Equal 'feed count' $feed.Count 2
+Assert-Equal 'maintenance sorted first' $feed[0].Kind 'maintenance'
+Assert-Equal 'headline is maintenance' (Get-WidgetHeadline $feed).Kind 'maintenance'
+$unseen = @(Get-NoticesToShow -Items $feed -SeenIds @('n1') -Max 3)
+Assert-Equal 'seen news hidden' $unseen.Count 1
+Assert-Equal 'maintenance still shown' $unseen[0].Id 'm1'
+$balloon = Format-NoticeBalloon $unseen
+Assert-Equal 'maintenance balloon' $balloon.Title 'Технические работы'
+Assert-Contains 'balloon text' $balloon.Text 'Окно обслуживания'
+$rss = @'
+<?xml version="1.0"?>
+<rss version="2.0"><channel><item>
+  <title>Плановые работы</title>
+  <description>&lt;p&gt;Сеть с 22:00&lt;/p&gt;</description>
+  <link>https://intranet.example/rss1</link>
+  <guid>rss-1</guid>
+  <category>maintenance</category>
+  <pubDate>Fri, 10 Oct 2026 09:00:00 GMT</pubDate>
+</item></channel></rss>
+'@
+$rssItems = @(ConvertFrom-NewsFeed $rss)
+Assert-Equal 'rss count' $rssItems.Count 1
+Assert-Equal 'rss kind' $rssItems[0].Kind 'maintenance'
+Assert-Equal 'rss id' $rssItems[0].Id 'rss-1'
+Assert-Contains 'rss body without tags' $rssItems[0].Body 'Сеть с 22:00'
+$ticketErrors = Test-TicketDraft -Subject 'ab' -Body '1234'
+Assert-True 'short ticket rejected' ($ticketErrors.Count -ge 2)
+$validTicket = Test-TicketDraft -Subject 'Не печатает' -Body 'Принтер на третьем этаже'
+Assert-Equal 'valid ticket' $validTicket.Count 0
+$payload = New-TicketPayload -Subject ' Не печатает ' -Body 'Принтер молчит' -Category 'Инцидент' -User 'ivan' -Computer 'PC-1' -CreatedAt '2026-10-10T12:00:00'
+Assert-Equal 'ticket subject trimmed' $payload.subject 'Не печатает'
+Assert-Equal 'ticket user' $payload.user 'ivan'
+$widgetCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{
+    Widget = [pscustomobject]@{
+        ServiceDeskUrl = 'not a url'
+        NewsUrl = 'https://intranet.example/news.json'
+        NewsPollMinutes = 0
+        Corner = 'nope'
+        Enabled = $false
+    }
+})
+Assert-Equal 'bad portal dropped' $widgetCfg.ServiceDeskUrl ''
+Assert-Equal 'news url kept' $widgetCfg.NewsUrl 'https://intranet.example/news.json'
+Assert-Equal 'poll floor' $widgetCfg.NewsPollMinutes 1
+Assert-Equal 'corner fallback' $widgetCfg.WidgetCorner 'BottomRight'
+Assert-Equal 'widget can be disabled' $widgetCfg.WidgetEnabled $false
+
+foreach ($name in @('DesktopSwitch.Logic.ps1', 'DesktopSwitch.ps1', 'DesktopSwitch.Widget.ps1', 'Install-DesktopSwitch.ps1', 'Uninstall-DesktopSwitch.ps1')) {
     $path = Join-Path $root $name
     $tokens = $null
     $parseErrors = $null

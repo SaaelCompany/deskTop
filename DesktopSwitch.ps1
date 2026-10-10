@@ -4,7 +4,7 @@
     Когда связи нет, папка «Рабочий стол» текущего пользователя переключается
     на локальный диск. Когда связь возвращается, восстанавливается сетевой путь.
 
-    Запуск в сеансе пользователя (не как служба и не от имени SYSTEM):
+    Запуск в сеансе пользователя, права администратора не нужны:
       powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\DesktopSwitch.ps1
       powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\DesktopSwitch.ps1 -Status
       powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\DesktopSwitch.ps1 -Once -WhatIf
@@ -22,8 +22,9 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
+. (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.0.0'
+$script:Version = '1.1.0'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -145,7 +146,7 @@ function Resolve-ConfigPath {
     $beside = Join-Path $PSScriptRoot 'config.json'
     if (Test-Path -LiteralPath $beside) { return (Resolve-Path -LiteralPath $beside).Path }
     $example = Join-Path $PSScriptRoot 'config.example.json'
-    throw "Рядом со скриптом нет config.json. Скопируйте '$example' в '$beside', укажите сетевой путь и поставьте Enabled в true."
+    throw "Рядом со скриптом нет config.json. Скопируйте '$example' в '$beside' и поставьте Enabled в true. Сетевой путь политика записывает сама."
 }
 
 function Read-DesktopConfig {
@@ -457,9 +458,15 @@ function Restart-UserExplorer {
 }
 
 function Show-UserNotice {
-    param([string]$Message)
+    param([string]$Message, [string]$Title = 'Рабочий стол')
     if (-not $script:Cfg.NotifyUser) { return }
     if ([string]::IsNullOrWhiteSpace($Message)) { return }
+    if ($script:TrayIcon) {
+        $script:TrayIcon.BalloonTipTitle = $Title
+        $script:TrayIcon.BalloonTipText = $Message
+        $script:TrayIcon.ShowBalloonTip(8000)
+        return
+    }
     if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
         Write-Log 'Уведомление пропущено: запустите PowerShell с ключом -STA.' 'WARN'
         return
@@ -472,7 +479,7 @@ function Show-UserNotice {
         $icon.Icon = [System.Drawing.SystemIcons]::Information
         $icon.Text = 'Рабочий стол'
         $icon.Visible = $true
-        $icon.BalloonTipTitle = 'Рабочий стол'
+        $icon.BalloonTipTitle = $Title
         $icon.BalloonTipText = $Message
         $icon.ShowBalloonTip(5000)
         $deadline = (Get-Date).AddSeconds(6)
@@ -499,6 +506,7 @@ function Read-StateTable {
         LastAction = ''
         LastReason = ''
         LastExplorerRestartAt = ''
+        SeenNoticeIds = @()
         UpdatedAt = ''
     }
     if (-not (Test-Path -LiteralPath $script:Cfg.StatePath)) { return $table }
@@ -519,6 +527,7 @@ function Read-StateTable {
     $table.LastAction = [string]$table.LastAction
     $table.LastReason = [string]$table.LastReason
     $table.LastExplorerRestartAt = [string]$table.LastExplorerRestartAt
+    $table.SeenNoticeIds = @(ConvertTo-IdList $table.SeenNoticeIds)
     return $table
 }
 
@@ -640,7 +649,9 @@ function Invoke-MonitorCycle {
     }
     $decision = Update-SwitchDecision -Verdict $verdict -Mode $mode -FailureStreak ([int]$script:State.FailureStreak) -SuccessStreak ([int]$script:State.SuccessStreak) -FailuresBeforeSwitch $script:Cfg.FailuresBeforeSwitch -SuccessesBeforeRestore $script:Cfg.SuccessesBeforeRestore -RestoreWhenOnline $script:Cfg.RestoreWhenOnline
     $reason = Get-OfflineReasonCode -Internet $internet -Share $share
-    Write-Log ("internet={0} share={1} verdict={2} mode={3}->{4} action={5} fail={6} success={7}" -f $internet, $share, $verdict, $mode, $decision.Mode, $decision.Action, $decision.FailureStreak, $decision.SuccessStreak)
+    $script:DesktopMode = [string]$decision.Mode
+    $script:DesktopVerdict = [string]$verdict
+    Write-Log ("internet={0} share={1} verdict={2} mode={3}->{4} action={5} fail={6} success={7} desktop={8}" -f $internet, $share, $verdict, $mode, $decision.Mode, $decision.Action, $decision.FailureStreak, $decision.SuccessStreak, $networkPath)
 
     $preview = $WhatIf -or -not $script:Cfg.Enabled
     if (Test-ShouldSyncShortcuts -SyncEnabled $script:Cfg.SyncShortcutsWhileOnline -ShareStatus $share) {
@@ -694,13 +705,17 @@ function Invoke-MonitorCycle {
                 $script:State.LastExplorerRestartAt = (Get-Date).ToString('o')
                 Save-StateTable $script:State
                 Write-Log 'Проводник перезапущен, чтобы смена рабочего стола стала видна.'
+                Start-Sleep -Seconds 1
+                if (Get-Command -Name Ensure-DesktopWidget -ErrorAction SilentlyContinue) {
+                    try { Ensure-DesktopWidget } catch { Write-Log ("Виджет не удалось вернуть на стол: {0}" -f $_.Exception.Message) 'WARN' }
+                }
             } else {
                 Write-Log 'Путь записан. Повторный перезапуск Проводника отложен, чтобы не закрывать его окна слишком часто.' 'WARN'
             }
         }
         if ($didChange) {
             $message = Get-SwitchMessage -Action $decision.Action -ReasonCode $reason
-            if (-not [string]::IsNullOrWhiteSpace($message)) { Show-UserNotice -Message $message }
+            if (-not [string]::IsNullOrWhiteSpace($message)) { Show-UserNotice -Message $message -Title 'Рабочий стол' }
             if (($decision.Action -eq 'SwitchToLocal' -or $decision.Action -eq 'ReassertLocal') -and (Test-Path -LiteralPath $script:Cfg.LocalDesktopPath)) {
                 $shortcutCount = @(Get-ChildItem -LiteralPath $script:Cfg.LocalDesktopPath -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '^\.(lnk|url)$' }).Count
                 if ($shortcutCount -eq 0) {
@@ -708,6 +723,9 @@ function Invoke-MonitorCycle {
                 }
             }
         }
+    }
+    if (Get-Command -Name Update-WidgetStatus -ErrorAction SilentlyContinue) {
+        try { Update-WidgetStatus } catch { }
     }
 }
 
@@ -749,7 +767,7 @@ try {
 }
 
 if (-not $script:Cfg.Enabled -and -not $WhatIf) {
-    Write-Log 'Программа выключена. Укажите пути в config.json и поставьте Enabled в true.'
+    Write-Log 'Программа выключена. Поставьте Enabled в true. Сетевой путь можно не указывать: его берёт политика.'
     exit 0
 }
 
@@ -765,13 +783,17 @@ try {
         Invoke-MonitorCycle
     } else {
         Write-Log ("DesktopSwitch {0} запущен. Пользователь={1} компьютер={2} условие={3} интервал={4}с." -f $script:Version, $env:USERNAME, $env:COMPUTERNAME, $script:Cfg.Trigger, $script:Cfg.CheckIntervalSeconds)
-        while ($true) {
-            try {
-                Invoke-MonitorCycle
-            } catch {
-                Write-Log ("Сбой цикла: {0}" -f $_.Exception.Message) 'ERROR'
+        if ($script:Cfg.WidgetEnabled) {
+            Start-WidgetApplication
+        } else {
+            while ($true) {
+                try {
+                    Invoke-MonitorCycle
+                } catch {
+                    Write-Log ("Сбой цикла: {0}" -f $_.Exception.Message) 'ERROR'
+                }
+                Start-Sleep -Seconds $script:Cfg.CheckIntervalSeconds
             }
-            Start-Sleep -Seconds $script:Cfg.CheckIntervalSeconds
         }
     }
 } finally {

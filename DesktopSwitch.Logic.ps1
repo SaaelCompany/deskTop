@@ -170,6 +170,17 @@ function Get-EffectiveDesktopConfig {
         }
     }
 
+    $widget = Get-Prop $Config 'Widget' $null
+    $cornerRaw = ([string](Get-Prop $widget 'Corner' 'BottomRight')).Trim().ToLowerInvariant()
+    $cornerMap = @{
+        'bottomright' = 'BottomRight'
+        'bottomleft' = 'BottomLeft'
+        'topright' = 'TopRight'
+        'topleft' = 'TopLeft'
+    }
+    $cornerKey = 'bottomright'
+    if ($cornerMap.ContainsKey($cornerRaw)) { $cornerKey = $cornerRaw }
+
     $localRaw = [string](Get-Prop $Config 'LocalDesktopPath' '%LOCALAPPDATA%\DesktopSwitch\LocalDesktop')
     $logRaw = [string](Get-Prop $Config 'LogPath' '%LOCALAPPDATA%\DesktopSwitch\desktop-switch.log')
     $stateRaw = [string](Get-Prop $Config 'StatePath' '%LOCALAPPDATA%\DesktopSwitch\state.json')
@@ -195,6 +206,15 @@ function Get-EffectiveDesktopConfig {
         LogPath = ConvertTo-ExpandedPath $logRaw
         StatePath = ConvertTo-ExpandedPath $stateRaw
         MaxLogBytes = Get-ClampedLogBytes (ConvertTo-Int (Get-Prop $Config 'MaxLogBytes' 1048576) 1048576)
+        WidgetEnabled = ConvertTo-Bool (Get-Prop $widget 'Enabled' $true) $true
+        WidgetTitle = ([string](Get-Prop $widget 'Title' 'Сервисная служба')).Trim()
+        WidgetCorner = $cornerMap[$cornerKey]
+        WidgetMargin = Get-ClampedMargin (ConvertTo-Int (Get-Prop $widget 'Margin' 16) 16)
+        ServiceDeskUrl = Select-SingleHttpUrl (Get-Prop $widget 'ServiceDeskUrl' '')
+        ServiceDeskApiUrl = Select-SingleHttpUrl (Get-Prop $widget 'ServiceDeskApiUrl' '')
+        ServiceDeskToken = ([string](Get-Prop $widget 'ServiceDeskToken' '')).Trim()
+        NewsUrl = Select-SingleHttpUrl (Get-Prop $widget 'NewsUrl' '')
+        NewsPollMinutes = Get-ClampedMinutes (ConvertTo-Int (Get-Prop $widget 'NewsPollMinutes' 10) 10)
     }
 }
 
@@ -212,7 +232,7 @@ function Get-DesktopConfigErrors {
 
     if ([string]::IsNullOrWhiteSpace($network)) {
         if (-not $AllowEmptyNetwork) {
-            $errors.Add('Укажите NetworkDesktopPath — UNC-путь общей папки рабочего стола, например \\server\share\Desktop. Либо оставьте путь пустым и один раз запустите программу, пока сетевой рабочий стол ещё открыт: путь будет определён автоматически.')
+            $errors.Add('Сетевой путь ещё неизвестен. Оставьте NetworkDesktopPath пустым: программа прочитает путь, который записала политика, когда сетевой стол открыт. Либо укажите UNC явно, если путь нужно зафиксировать.')
         }
     } elseif (-not (Test-UncPathString $network)) {
         $errors.Add('NetworkDesktopPath должен быть UNC-путём вида \\server\share\Desktop.')
@@ -240,10 +260,36 @@ function Get-DesktopConfigErrors {
 
 function Resolve-NetworkPathValue {
     param([string]$Configured, [string]$Learned, [string]$Current)
+    # An explicit config path is optional. Group Policy writes the live UNC into the
+    # user profile, and that path can differ between users, so the current shell path
+    # wins over the path remembered earlier. The remembered path is used only after
+    # the desktop has already been switched to a local folder.
     if (Test-UncPathString $Configured) { return $Configured.Trim() }
-    if (Test-UncPathString $Learned) { return $Learned.Trim() }
     if (Test-UncPathString $Current) { return $Current.Trim() }
+    if (Test-UncPathString $Learned) { return $Learned.Trim() }
     return ''
+}
+
+function Get-ClampedMinutes {
+    param([int]$Minutes)
+    if ($Minutes -lt 1) { return 1 }
+    if ($Minutes -gt 240) { return 240 }
+    return $Minutes
+}
+
+function Get-ClampedMargin {
+    param([int]$Pixels)
+    if ($Pixels -lt 0) { return 0 }
+    if ($Pixels -gt 80) { return 80 }
+    return $Pixels
+}
+
+function Select-SingleHttpUrl {
+    param($Url)
+    if ([string]::IsNullOrWhiteSpace([string]$Url)) { return '' }
+    $clean = Select-HttpProbeUrl -Urls @([string]$Url)
+    if ($clean.Count -eq 0) { return '' }
+    return [string]$clean[0]
 }
 
 function Get-DesktopModeFromPath {
@@ -460,4 +506,225 @@ function Test-CooldownElapsed {
         [ref]$when)
     if (-not $parsed) { return $true }
     return ($Now - $when).TotalSeconds -ge $CooldownSeconds
+}
+
+function Remove-NoticeMarkup {
+    param([string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
+    $decoded = [System.Net.WebUtility]::HtmlDecode($Text)
+    $plain = [regex]::Replace($decoded, '<[^>]+>', ' ')
+    return ([regex]::Replace($plain, '\s+', ' ')).Trim()
+}
+
+function Get-NoticeKind {
+    param([string]$Raw)
+    if ([string]$Raw -match '(?i)maintenance|outage|incident|работ|техн') { return 'maintenance' }
+    return 'news'
+}
+
+function Get-NoticeIdentity {
+    param([string]$Explicit, [string]$Url, [string]$Title, [string]$PublishedAt)
+    if (-not [string]::IsNullOrWhiteSpace($Explicit)) { return $Explicit.Trim() }
+    if (-not [string]::IsNullOrWhiteSpace($Url)) { return $Url.Trim() }
+    $raw = ([string]$Title + '|' + [string]$PublishedAt).ToLowerInvariant()
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($raw)
+        $hash = $sha.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hash)).Replace('-', '').Substring(0, 16).ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function ConvertTo-NoticeTime {
+    param([string]$Raw)
+    if ([string]::IsNullOrWhiteSpace($Raw)) { return '' }
+    $when = [datetime]::MinValue
+    $parsed = [datetime]::TryParse(
+        $Raw,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::RoundtripKind,
+        [ref]$when)
+    if (-not $parsed) {
+        $parsed = [datetime]::TryParse($Raw, [ref]$when)
+    }
+    if (-not $parsed) { return $Raw.Trim() }
+    return $when.ToString('o')
+}
+
+function New-Notice {
+    param([string]$Id, [string]$Title, [string]$Body, [string]$Kind, [string]$Url, [string]$PublishedAt)
+    $safeTitle = Remove-NoticeMarkup $Title
+    if ([string]::IsNullOrWhiteSpace($safeTitle)) { $safeTitle = 'Сообщение' }
+    $safeUrl = ''
+    if (-not [string]::IsNullOrWhiteSpace($Url)) { $safeUrl = $Url.Trim() }
+    $published = ConvertTo-NoticeTime $PublishedAt
+    return [pscustomobject]@{
+        Id = Get-NoticeIdentity -Explicit $Id -Url $safeUrl -Title $safeTitle -PublishedAt $published
+        Title = $safeTitle
+        Body = Remove-NoticeMarkup $Body
+        Kind = Get-NoticeKind $Kind
+        Url = $safeUrl
+        PublishedAt = $published
+    }
+}
+
+function ConvertFrom-NewsJson {
+    param($Parsed)
+    $nodes = $null
+    if ($Parsed -is [System.Array]) {
+        $nodes = $Parsed
+    } else {
+        $nodes = Get-Prop $Parsed 'items' $null
+        if ($null -eq $nodes) { $nodes = Get-Prop $Parsed 'Items' $null }
+    }
+    $items = New-Object System.Collections.Generic.List[object]
+    foreach ($node in @($nodes)) {
+        if ($null -eq $node) { continue }
+        $kind = [string](Get-Prop $node 'kind' '')
+        if ([string]::IsNullOrWhiteSpace($kind)) { $kind = [string](Get-Prop $node 'category' '') }
+        $items.Add((New-Notice -Id ([string](Get-Prop $node 'id' '')) -Title ([string](Get-Prop $node 'title' '')) -Body ([string](Get-Prop $node 'body' '')) -Kind $kind -Url ([string](Get-Prop $node 'url' '')) -PublishedAt ([string](Get-Prop $node 'publishedAt' ''))))
+    }
+    return $items.ToArray()
+}
+
+function Get-XmlChildText {
+    param($Node, [string]$Name)
+    if ($null -eq $Node) { return '' }
+    $child = $Node.SelectSingleNode("*[local-name()='$Name']")
+    if ($null -eq $child) { return '' }
+    return [string]$child.InnerText
+}
+
+function Get-XmlLink {
+    param($Node)
+    if ($null -eq $Node) { return '' }
+    $link = $Node.SelectSingleNode("*[local-name()='link']")
+    if ($null -eq $link) { return '' }
+    $href = $link.GetAttribute('href')
+    if (-not [string]::IsNullOrWhiteSpace($href)) { return $href }
+    return [string]$link.InnerText
+}
+
+function ConvertFrom-NewsXml {
+    param([xml]$Xml)
+    $items = New-Object System.Collections.Generic.List[object]
+    foreach ($node in @($Xml.SelectNodes('/rss/channel/item'))) {
+        $items.Add((New-Notice -Id (Get-XmlChildText $node 'guid') -Title (Get-XmlChildText $node 'title') -Body (Get-XmlChildText $node 'description') -Kind (Get-XmlChildText $node 'category') -Url (Get-XmlLink $node) -PublishedAt (Get-XmlChildText $node 'pubDate')))
+    }
+    foreach ($node in @($Xml.SelectNodes('/*[local-name()="feed"]/*[local-name()="entry"]'))) {
+        $body = Get-XmlChildText $node 'summary'
+        if ([string]::IsNullOrWhiteSpace($body)) { $body = Get-XmlChildText $node 'content' }
+        $items.Add((New-Notice -Id (Get-XmlChildText $node 'id') -Title (Get-XmlChildText $node 'title') -Body $body -Kind (Get-XmlChildText $node 'category') -Url (Get-XmlLink $node) -PublishedAt (Get-XmlChildText $node 'updated')))
+    }
+    return $items.ToArray()
+}
+
+function ConvertFrom-NewsFeed {
+    param([string]$Content)
+    if ([string]::IsNullOrWhiteSpace($Content)) { return @() }
+    $trim = $Content.Trim()
+    if ($trim.StartsWith('<')) {
+        $xml = New-Object xml
+        $xml.LoadXml($trim)
+        return ConvertFrom-NewsXml $xml
+    }
+    $parsed = $trim | ConvertFrom-Json
+    return ConvertFrom-NewsJson $parsed
+}
+
+function Sort-Notices {
+    param($Items)
+    $list = @($Items | Where-Object { $null -ne $_ })
+    if ($list.Count -eq 0) { return @() }
+    return @($list | Sort-Object @{ Expression = { if ([string]$_.Kind -eq 'maintenance') { 0 } else { 1 } } }, @{ Expression = { [string]$_.PublishedAt }; Descending = $true })
+}
+
+function Get-NoticesToShow {
+    param($Items, $SeenIds, [int]$Max = 3)
+    if ($Max -lt 1) { $Max = 1 }
+    $seen = @{}
+    foreach ($id in @($SeenIds)) {
+        $text = [string]$id
+        if (-not [string]::IsNullOrWhiteSpace($text)) { $seen[$text] = $true }
+    }
+    $fresh = New-Object System.Collections.Generic.List[object]
+    foreach ($item in @(Sort-Notices $Items)) {
+        if ($null -eq $item) { continue }
+        if ($seen.ContainsKey([string]$item.Id)) { continue }
+        $fresh.Add($item)
+        if ($fresh.Count -ge $Max) { break }
+    }
+    return $fresh.ToArray()
+}
+
+function Format-NoticeBalloon {
+    param($Notices)
+    $list = @($Notices | Where-Object { $null -ne $_ })
+    if ($list.Count -eq 0) { return $null }
+    $title = 'Новости'
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($item in $list) {
+        if ([string]$item.Kind -eq 'maintenance') { $title = 'Технические работы' }
+        $prefix = 'Новость: '
+        if ([string]$item.Kind -eq 'maintenance') { $prefix = 'Работы: ' }
+        $lines.Add($prefix + [string]$item.Title)
+    }
+    $text = [string]::Join("`n", $lines.ToArray())
+    if ($text.Length -gt 220) { $text = $text.Substring(0, 217) + '...' }
+    return [pscustomobject]@{ Title = $title; Text = $text }
+}
+
+function Get-WidgetHeadline {
+    param($Items)
+    $list = @(Sort-Notices $Items)
+    if ($list.Count -eq 0) {
+        return [pscustomobject]@{ Title = 'Пока нет сообщений'; Kind = 'none' }
+    }
+    return [pscustomobject]@{ Title = [string]$list[0].Title; Kind = [string]$list[0].Kind }
+}
+
+function ConvertTo-IdList {
+    param($Value)
+    $list = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $Value) { return ,$list }
+    foreach ($id in @($Value)) {
+        $text = [string]$id
+        if (-not [string]::IsNullOrWhiteSpace($text)) { $list.Add($text.Trim()) }
+    }
+    return ,$list
+}
+
+function Test-TicketDraft {
+    param([string]$Subject, [string]$Body)
+    $errors = New-Object System.Collections.Generic.List[string]
+    $theme = ''
+    $text = ''
+    if ($null -ne $Subject) { $theme = $Subject.Trim() }
+    if ($null -ne $Body) { $text = $Body.Trim() }
+    if ($theme.Length -lt 3) { $errors.Add('Укажите тему заявки, хотя бы 3 символа.') }
+    if ($theme.Length -gt 200) { $errors.Add('Тема длиннее 200 символов.') }
+    if ($text.Length -lt 5) { $errors.Add('Опишите заявку подробнее.') }
+    if ($text.Length -gt 4000) { $errors.Add('Текст длиннее 4000 символов.') }
+    return ,$errors
+}
+
+function New-TicketPayload {
+    param(
+        [string]$Subject,
+        [string]$Body,
+        [string]$Category,
+        [string]$User,
+        [string]$Computer,
+        [string]$CreatedAt
+    )
+    return [pscustomobject]@{
+        subject = $Subject.Trim()
+        body = $Body.Trim()
+        category = $Category.Trim()
+        user = $User
+        computer = $Computer
+        createdAt = $CreatedAt
+    }
 }

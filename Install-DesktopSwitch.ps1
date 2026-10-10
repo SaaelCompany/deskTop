@@ -20,7 +20,7 @@ $monitor = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'DesktopSwitch.ps
 $configPath = Join-Path $PSScriptRoot 'config.json'
 $example = Join-Path $PSScriptRoot 'config.example.json'
 if (-not (Test-Path -LiteralPath $configPath)) {
-    throw "Нет файла config.json. Скопируйте '$example' в '$configPath', укажите сетевой путь и поставьте Enabled в true."
+    throw "Нет файла config.json. Скопируйте '$example' в '$configPath' и поставьте Enabled в true. Права администратора не нужны, сетевой путь политика задаёт сама."
 }
 
 $loaded = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json

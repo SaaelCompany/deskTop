@@ -1,7 +1,7 @@
 ﻿{
-  "Note": "Скопируйте этот файл в config.json. Замените \\\\CHANGE-ME\\... на UNC общей папки рабочего стола и поставьте Enabled в true. Саму программу положите на локальный диск, иначе при обрыве сети она не сможет запуститься.",
+  "Note": "Скопируйте этот файл в config.json и поставьте Enabled в true. NetworkDesktopPath оставьте пустым: путь общего стола читается из политики пользователя и может отличаться. Права администратора пользователю не нужны. Программу положите на локальный диск.",
   "Enabled": false,
-  "NetworkDesktopPath": "\\\\CHANGE-ME\\DesktopShare\\Desktop",
+  "NetworkDesktopPath": "",
   "LocalDesktopPath": "%LOCALAPPDATA%\\DesktopSwitch\\LocalDesktop",
   "Trigger": "InternetOrShare",
   "CheckIntervalSeconds": 15,
@@ -23,5 +23,16 @@
   "ShareProbeTimeoutSeconds": 4,
   "LogPath": "%LOCALAPPDATA%\\DesktopSwitch\\desktop-switch.log",
   "StatePath": "%LOCALAPPDATA%\\DesktopSwitch\\state.json",
-  "MaxLogBytes": 1048576
+  "MaxLogBytes": 1048576,
+  "Widget": {
+    "Enabled": true,
+    "Title": "Сервисная служба",
+    "Corner": "BottomRight",
+    "Margin": 16,
+    "ServiceDeskUrl": "",
+    "ServiceDeskApiUrl": "",
+    "ServiceDeskToken": "",
+    "NewsUrl": "",
+    "NewsPollMinutes": 10
+  }
 }
