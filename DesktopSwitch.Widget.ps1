@@ -44,6 +44,13 @@ $script:ListPopup = $null
 $script:ListPopupClosing = $false
 $script:ListPopupReady = $false
 $script:SoftListSource = $null
+$script:ListScroll = 0
+$script:ListMaxRows = 0
+$script:ListRows = @()
+$script:ListRowH = 34
+$script:ListPad = 8
+$script:SendHot = $false
+$script:CloseHot = $false
 
 $script:DesktopHostSource = @'
 using System;
@@ -172,6 +179,38 @@ public static class DesktopHost {
 }
 '@
 
+function Initialize-DeskFrame {
+    if ('DeskFrame' -as [type]) { return $true }
+    $source = @'
+using System;
+using System.Runtime.InteropServices;
+public static class DeskFrame {
+    [DllImport("dwmapi.dll")]
+    static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+    public static bool Round(IntPtr hwnd) {
+        if (hwnd == IntPtr.Zero) return false;
+        int pref = 2;
+        return DwmSetWindowAttribute(hwnd, 33, ref pref, 4) == 0;
+    }
+}
+'@
+    try {
+        Add-Type -TypeDefinition $source -ErrorAction Stop
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Enable-SmoothFrame {
+    param($Form)
+    if ($null -eq $Form -or $Form.IsDisposed -or -not $Form.IsHandleCreated) { return }
+    if (-not (Initialize-DeskFrame)) { return }
+    $rounded = $false
+    try { $rounded = [DeskFrame]::Round($Form.Handle) } catch { $rounded = $false }
+    if ($rounded) { $Form.Region = $null }
+}
+
 function Initialize-DesktopHost {
     if ('DesktopHost' -as [type]) { return $true }
     try {
@@ -260,13 +299,13 @@ function Get-SupportStatus {
 function Update-SoftFieldTheme {
     param($Field, [bool]$ReadOnly)
     if ($null -eq $Field) { return }
-    $border = Get-ThemeColor FieldBorder
+    $canvas = Get-ThemeColor Canvas
     $fill = Get-ThemeColor FieldFill
     if ($ReadOnly) { $fill = Get-ThemeColor FieldReadOnly }
     $ink = Get-ThemeColor Ink
     $icon = Get-ThemeColor Icon
-    $Field.Shell.BackColor = $border
-    $Field.Fill.BackColor = $fill
+    $Field.Shell.BackColor = $canvas
+    $Field.Fill.BackColor = $canvas
     $Field.Icon.BackColor = $fill
     $Field.Icon.ForeColor = $icon
     if ($Field.Editor -is [System.Windows.Forms.Control]) {
@@ -293,6 +332,7 @@ function Update-SoftFieldTheme {
             $child.ForeColor = $icon
         }
     }
+    $Field.Fill.Invalidate()
 }
 
 function Apply-TrayMenuPalette {
@@ -351,8 +391,15 @@ function Apply-WidgetPalette {
     $ui.Identity.BackColor = $canvas
     $ui.Status.BackColor = $canvas
     $ui.CloseButton.BackColor = $canvas
-    $ui.CloseButton.ForeColor = $muted
-    $ui.CloseButton.FlatAppearance.MouseOverBackColor = $hover
+    if ($ui.CloseButton -is [System.Windows.Forms.Button]) {
+        $ui.CloseButton.ForeColor = $muted
+        $ui.CloseButton.FlatAppearance.MouseOverBackColor = $hover
+    }
+    $ui.CloseButton.Invalidate()
+    if ($ui.ContainsKey('Mark') -and $null -ne $ui.Mark) {
+        $ui.Mark.BackColor = $canvas
+        $ui.Mark.Invalidate()
+    }
     $ui.HeaderRule.BackColor = $rule
     $ui.Sheet.BackColor = $canvas
     $ui.TicketTab.BackColor = $canvas
@@ -371,8 +418,11 @@ function Apply-WidgetPalette {
     $ui.PortalLink.BackColor = $canvas
     $ui.PortalLink.LinkColor = $accent
     $ui.PortalLink.ActiveLinkColor = $accent
-    $ui.SendButton.BackColor = $accent
-    $ui.SendButton.FlatAppearance.MouseOverBackColor = (Get-ThemeColor AccentHover)
+    $ui.SendButton.BackColor = $canvas
+    if ($ui.SendButton -is [System.Windows.Forms.Button]) {
+        $ui.SendButton.FlatAppearance.MouseOverBackColor = (Get-ThemeColor AccentHover)
+    }
+    $ui.SendButton.Invalidate()
     Update-SoftFieldTheme $ui.LoginField $true
     Update-SoftFieldTheme $ui.ComputerField $true
     Update-SoftFieldTheme $ui.ProjectField $false
@@ -556,30 +606,69 @@ function New-SendGlyph {
 function Update-FlatButtonRegion {
     param($Button)
     if ($null -eq $Button) { return }
-    $old = $Button.Region
-    $Button.Region = New-Object System.Drawing.Region((New-RoundedPath -Width $Button.Width -Height $Button.Height -Radius 12))
-    if ($null -ne $old) { $old.Dispose() }
+    $Button.Invalidate()
 }
 
 function New-FlatButton {
     param([string]$Text, [System.Drawing.Point]$Location, [System.Drawing.Size]$Size)
-    $button = New-Object System.Windows.Forms.Button
+    $button = New-Object System.Windows.Forms.Panel
     $button.Text = $Text
     $button.Location = $Location
     $button.Size = $Size
-    $button.FlatStyle = 'Flat'
-    $button.BackColor = Get-ThemeColor Accent
+    $button.BackColor = Get-ThemeColor Canvas
     $button.ForeColor = [System.Drawing.Color]::White
-    if ($script:ButtonFont) { $button.Font = $script:ButtonFont }
-    else { $button.Font = $script:TabFontBold }
-    $button.FlatAppearance.BorderSize = 0
-    $button.FlatAppearance.MouseOverBackColor = Get-ThemeColor AccentHover
+    $button.Font = $script:ButtonFont
     $button.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $button.Image = New-SendGlyph
-    $button.TextImageRelation = 'ImageBeforeText'
-    $button.ImageAlign = 'MiddleCenter'
-    $button.TextAlign = 'MiddleCenter'
-    Update-FlatButtonRegion $button
+    $button.Add_MouseEnter({ $script:SendHot = $true; $this.Invalidate() })
+    $button.Add_MouseLeave({ $script:SendHot = $false; $this.Invalidate() })
+    $button.Add_TextChanged({ $this.Invalidate() })
+    $button.Add_EnabledChanged({ $this.Invalidate() })
+    $button.Add_Paint({
+        $box = $this
+        $g = $_.Graphics
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
+        $g.Clear($box.BackColor)
+        $w = $box.Width - 2
+        $h = $box.Height - 2
+        if ($w -lt 4 -or $h -lt 4) { return }
+        $path = New-RoundedPath -Width $w -Height $h -Radius 12
+        $g.TranslateTransform(1, 1)
+        $fill = Get-ThemeColor Accent
+        $ink = [System.Drawing.Color]::White
+        if (-not $box.Enabled) {
+            $fill = Get-ThemeColor FieldBorder
+            $ink = Get-ThemeColor Muted
+        } elseif ($script:SendHot) {
+            $fill = Get-ThemeColor AccentHover
+        }
+        $brush = New-Object System.Drawing.SolidBrush $fill
+        $g.FillPath($brush, $path)
+        $brush.Dispose()
+        $path.Dispose()
+        $g.ResetTransform()
+        $font = $box.Font
+        $label = [string]$box.Text
+        $measured = $g.MeasureString($label, $font)
+        $icon = 14
+        $gap = 8
+        $total = $icon + $gap + $measured.Width
+        $x = ($box.Width - $total) / 2
+        if ($x -lt 8) { $x = 8 }
+        $mid = $box.Height / 2
+        $textBrush = New-Object System.Drawing.SolidBrush $ink
+        $ox = $x
+        $oy = $mid - 6
+        $points = New-Object System.Drawing.PointF[] 4
+        $points[0] = New-Object System.Drawing.PointF(($ox + 0.5), ($oy + 6))
+        $points[1] = New-Object System.Drawing.PointF(($ox + 13.5), ($oy + 0.5))
+        $points[2] = New-Object System.Drawing.PointF(($ox + 7.5), ($oy + 12.5))
+        $points[3] = New-Object System.Drawing.PointF(($ox + 6), ($oy + 7))
+        $g.FillPolygon($textBrush, $points)
+        $g.DrawString($label, $font, $textBrush, ($x + $icon + $gap), ($mid - ($measured.Height / 2) - 1))
+        $textBrush.Dispose()
+    })
     return $button
 }
 
@@ -591,17 +680,14 @@ function Update-SoftFieldSize {
     $editor = $Field.Editor
     $icon = $Field.Icon
     $shell.Size = New-Object System.Drawing.Size($Width, $Height)
-    $oldShell = $shell.Region
-    $shell.Region = New-Object System.Drawing.Region((New-RoundedPath -Width $Width -Height $Height -Radius 12))
-    if ($null -ne $oldShell) { $oldShell.Dispose() }
-    $fill.SetBounds(1, 1, ($Width - 2), ($Height - 2))
-    $oldFill = $fill.Region
-    $fill.Region = New-Object System.Drawing.Region((New-RoundedPath -Width ($Width - 2) -Height ($Height - 2) -Radius 11))
-    if ($null -ne $oldFill) { $oldFill.Dispose() }
-    if ($null -ne $icon) { $icon.SetBounds(2, 0, 32, ($Height - 2)) }
+    $shell.Region = $null
+    $fill.SetBounds(0, 0, $Width, $Height)
+    $fill.Region = $null
+    if ($null -ne $icon) { $icon.SetBounds(10, 4, 28, ($Height - 8)) }
     if ($editor -is [System.Windows.Forms.TextBox] -and $editor.Multiline) {
-        $editor.SetBounds(36, 8, ($Width - 52), ($Height - 18))
+        $editor.SetBounds(40, 10, ($Width - 56), ($Height - 20))
     }
+    $fill.Invalidate()
 }
 
 function Initialize-SoftListType {
@@ -691,7 +777,52 @@ function Close-SoftListPopup {
         $script:ListPopupClosing = $false
         $script:ListPopup = $null
         $script:SoftListSource = $null
+        $script:ListRows = @()
+        $script:ListScroll = 0
     }
+}
+
+function Update-SoftListRows {
+    $list = $script:SoftListSource
+    $rows = @($script:ListRows)
+    if ($null -eq $list -or $rows.Count -eq 0) { return }
+    $count = $list.Items.Count
+    $max = [int]$script:ListMaxRows
+    if ($max -lt 1) { $max = $rows.Count }
+    $maxScroll = $count - $max
+    if ($maxScroll -lt 0) { $maxScroll = 0 }
+    if ($script:ListScroll -lt 0) { $script:ListScroll = 0 }
+    if ($script:ListScroll -gt $maxScroll) { $script:ListScroll = $maxScroll }
+    $pad = [int]$script:ListPad
+    $rowH = [int]$script:ListRowH
+    $popupW = 0
+    if ($script:ListPopup -and -not $script:ListPopup.IsDisposed) { $popupW = $script:ListPopup.ClientSize.Width }
+    for ($i = 0; $i -lt $rows.Count; $i++) {
+        $row = $rows[$i]
+        $index = $script:ListScroll + $i
+        if ($index -ge $count) {
+            $row.Visible = $false
+            continue
+        }
+        $row.Visible = $true
+        $row.Text = [string]$list.Items[$index]
+        $row.Tag = $index
+        $row.SetBounds(8, ($pad + ($i * $rowH) + 2), ($popupW - 20), ($rowH - 4))
+        if ($index -eq $list.SelectedIndex) {
+            $row.BackColor = Get-ThemeColor Accent
+            $row.ForeColor = [System.Drawing.Color]::White
+        } else {
+            $row.BackColor = Get-ThemeColor FieldFill
+            $row.ForeColor = Get-ThemeColor Ink
+        }
+    }
+    if ($script:ListPopup -and -not $script:ListPopup.IsDisposed) { $script:ListPopup.Invalidate() }
+}
+
+function Move-SoftListScroll {
+    param([int]$Delta)
+    $script:ListScroll = [int]$script:ListScroll + $Delta
+    Update-SoftListRows
 }
 
 function Show-SoftListPopup {
@@ -699,11 +830,34 @@ function Show-SoftListPopup {
     if ($null -eq $List -or -not $List.Enabled) { return }
     if ($List.Items.Count -eq 0) { return }
     Close-SoftListPopup
-    $rowH = 36
-    $visible = $List.Items.Count
-    if ($visible -gt 6) { $visible = 6 }
+    $rowH = 34
+    $pad = 8
+    $count = $List.Items.Count
+    $anchorTop = $Anchor.PointToScreen((New-Object System.Drawing.Point(0, 0)))
+    $anchorBottom = $Anchor.PointToScreen((New-Object System.Drawing.Point(0, $Anchor.Height)))
+    $screen = [System.Windows.Forms.Screen]::FromControl($Anchor).WorkingArea
+    $limitTop = $screen.Top + 8
+    $limitBottom = $screen.Bottom - 8
+    if ($script:PanelForm -and -not $script:PanelForm.IsDisposed) {
+        if ($script:PanelForm.Top -gt $limitTop) { $limitTop = $script:PanelForm.Top + 12 }
+        if ($script:PanelForm.Bottom -lt $limitBottom) { $limitBottom = $script:PanelForm.Bottom - 12 }
+    }
+    $spaceBelow = $limitBottom - $anchorBottom.Y - 6
+    $spaceAbove = $anchorTop.Y - 6 - $limitTop
+    $room = $spaceBelow
+    if ($spaceAbove -gt $room) { $room = $spaceAbove }
+    $maxRows = [int][Math]::Floor(($room - ($pad * 2)) / $rowH)
+    if ($maxRows -lt 3) { $maxRows = 3 }
+    if ($maxRows -gt 7) { $maxRows = 7 }
+    if ($maxRows -gt $count) { $maxRows = $count }
     $popupW = $Anchor.Width
-    $popupH = $visible * $rowH
+    $popupH = ($pad * 2) + ($maxRows * $rowH)
+    $openUp = ($spaceBelow -lt $popupH) -and ($spaceAbove -ge $spaceBelow)
+    $originX = $anchorTop.X
+    if ($openUp) { $originY = $anchorTop.Y - 6 - $popupH }
+    else { $originY = $anchorBottom.Y + 6 }
+    if ($originY -lt $limitTop) { $originY = $limitTop }
+    if (($originY + $popupH) -gt $limitBottom) { $originY = $limitBottom - $popupH }
     $form = New-Object System.Windows.Forms.Form
     $form.FormBorderStyle = 'None'
     $form.ShowInTaskbar = $false
@@ -712,54 +866,75 @@ function Show-SoftListPopup {
     $form.BackColor = Get-ThemeColor FieldFill
     $form.ClientSize = New-Object System.Drawing.Size($popupW, $popupH)
     $form.Region = New-Object System.Drawing.Region((New-RoundedPath -Width $popupW -Height $popupH -Radius 12))
-    $origin = $Anchor.PointToScreen((New-Object System.Drawing.Point(0, ($Anchor.Height + 4))))
-    $screen = [System.Windows.Forms.Screen]::FromControl($Anchor).WorkingArea
-    if (($origin.Y + $popupH) -gt $screen.Bottom) { $origin.Y = $origin.Y - $Anchor.Height - 8 - $popupH }
-    $form.Location = $origin
-    $scroller = New-Object System.Windows.Forms.Panel
-    $scroller.Dock = 'Fill'
-    $scroller.AutoScroll = ($List.Items.Count -gt 6)
-    $scroller.BackColor = Get-ThemeColor FieldFill
+    $form.Location = New-Object System.Drawing.Point($originX, $originY)
     $script:SoftListSource = $List
-    for ($i = 0; $i -lt $List.Items.Count; $i++) {
+    $script:ListScroll = 0
+    if ($List.SelectedIndex -gt ($maxRows - 1)) { $script:ListScroll = $List.SelectedIndex - 1 }
+    $script:ListMaxRows = $maxRows
+    $script:ListRowH = $rowH
+    $script:ListPad = $pad
+    $script:ListRows = @()
+    $wheel = { Move-SoftListScroll -Delta (-1 * [int]($_.Delta / 120)) }
+    for ($i = 0; $i -lt $maxRows; $i++) {
         $row = New-Object System.Windows.Forms.Label
-        $row.Text = [string]$List.Items[$i]
-        $row.Tag = $i
         $row.Font = $script:FieldFont
         $row.AutoEllipsis = $true
         $row.TextAlign = 'MiddleLeft'
         $row.Cursor = [System.Windows.Forms.Cursors]::Hand
-        $rowWidth = $popupW
-        if ($List.Items.Count -gt 6) { $rowWidth = $popupW - 18 }
-        $row.SetBounds(0, ($i * $rowH), $rowWidth, $rowH)
-        $row.Padding = New-Object System.Windows.Forms.Padding(14, 0, 12, 0)
-        if ($i -eq $List.SelectedIndex) {
-            $row.BackColor = Get-ThemeColor Accent
-            $row.ForeColor = [System.Drawing.Color]::White
-        } else {
-            $row.BackColor = Get-ThemeColor FieldFill
-            $row.ForeColor = Get-ThemeColor Ink
-        }
+        $row.Padding = New-Object System.Windows.Forms.Padding(10, 0, 8, 0)
         $row.Add_Click({
             $source = $script:SoftListSource
             if ($null -ne $source) { $source.SelectedIndex = [int]$this.Tag }
             Close-SoftListPopup
         })
-        $scroller.Controls.Add($row)
+        $row.Add_MouseEnter({
+            $source = $script:SoftListSource
+            if ($null -eq $source) { return }
+            if ([int]$this.Tag -eq $source.SelectedIndex) { return }
+            $this.BackColor = Get-ThemeColor Hover
+        })
+        $row.Add_MouseLeave({ Update-SoftListRows })
+        $row.Add_MouseWheel($wheel)
+        $form.Controls.Add($row)
+        $script:ListRows += $row
     }
-    $form.Controls.Add($scroller)
-    $form.Add_Shown({ $script:ListPopupReady = $true })
+    $form.Add_MouseWheel($wheel)
+    $form.Add_Paint({
+        $list = $script:SoftListSource
+        if ($null -eq $list) { return }
+        $count = $list.Items.Count
+        $max = [int]$script:ListMaxRows
+        if ($count -le $max -or $max -lt 1) { return }
+        $g = $_.Graphics
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $thumbH = [int](($this.Height - 16) * $max / $count)
+        if ($thumbH -lt 16) { $thumbH = 16 }
+        $maxScroll = $count - $max
+        if ($maxScroll -lt 1) { return }
+        $travel = $this.Height - 16 - $thumbH
+        $y = 8 + [int]($travel * $script:ListScroll / $maxScroll)
+        $brush = New-Object System.Drawing.SolidBrush (Get-ThemeColor Icon)
+        $g.FillRectangle($brush, ($this.Width - 7), $y, 3, $thumbH)
+        $brush.Dispose()
+    })
+    $form.Add_Shown({
+        $script:ListPopupReady = $true
+        Enable-SmoothFrame $script:ListPopup
+    })
     $form.Add_Deactivate({
         if (-not $script:ListPopupReady) { return }
         Close-SoftListPopup
     })
     $form.Add_KeyDown({
         if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { Close-SoftListPopup }
+        elseif ($_.KeyCode -eq [System.Windows.Forms.Keys]::Down) { Move-SoftListScroll 1 }
+        elseif ($_.KeyCode -eq [System.Windows.Forms.Keys]::Up) { Move-SoftListScroll -1 }
     })
     $form.KeyPreview = $true
     if ($script:PanelForm -and -not $script:PanelForm.IsDisposed) { $form.Owner = $script:PanelForm }
     $script:ListPopupReady = $false
     $script:ListPopup = $form
+    Update-SoftListRows
     $form.Show()
 }
 
@@ -771,26 +946,46 @@ function New-SoftField {
         [int]$Width = 328,
         [int]$Height = 40
     )
-    $border = Get-ThemeColor FieldBorder
     $fillColor = Get-ThemeColor FieldFill
     if ($ReadOnly) { $fillColor = Get-ThemeColor FieldReadOnly }
     $iconColor = Get-ThemeColor Icon
     $ink = Get-ThemeColor Ink
     $shell = New-Object System.Windows.Forms.Panel
     $shell.Size = New-Object System.Drawing.Size($Width, $Height)
-    $shell.BackColor = $border
-    $shell.Region = New-Object System.Drawing.Region((New-RoundedPath -Width $Width -Height $Height -Radius 12))
+    $shell.BackColor = Get-ThemeColor Canvas
     $fill = New-Object System.Windows.Forms.Panel
-    $fill.SetBounds(1, 1, ($Width - 2), ($Height - 2))
-    $fill.BackColor = $fillColor
-    $fill.Region = New-Object System.Drawing.Region((New-RoundedPath -Width ($Width - 2) -Height ($Height - 2) -Radius 11))
+    $fill.SetBounds(0, 0, $Width, $Height)
+    $fill.BackColor = Get-ThemeColor Canvas
+    if ($ReadOnly) { $fill.AccessibleName = 'ro' } else { $fill.AccessibleName = '' }
+    $fill.Add_Paint({
+        $box = $this
+        $g = $_.Graphics
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $g.Clear((Get-ThemeColor Canvas))
+        $w = $box.Width - 2
+        $h = $box.Height - 2
+        if ($w -lt 8 -or $h -lt 8) { return }
+        $path = New-RoundedPath -Width $w -Height $h -Radius 12
+        $g.TranslateTransform(1, 1)
+        $tone = Get-ThemeColor FieldFill
+        if ($box.AccessibleName -eq 'ro') { $tone = Get-ThemeColor FieldReadOnly }
+        $brush = New-Object System.Drawing.SolidBrush $tone
+        $g.FillPath($brush, $path)
+        $pen = New-Object System.Drawing.Pen (Get-ThemeColor FieldBorder)
+        $g.DrawPath($pen, $path)
+        $pen.Dispose()
+        $brush.Dispose()
+        $path.Dispose()
+        $g.ResetTransform()
+    })
     $iconLabel = New-Object System.Windows.Forms.Label
     $iconLabel.Text = $Icon
     $iconLabel.Font = $script:IconFont
     $iconLabel.ForeColor = $iconColor
     $iconLabel.BackColor = $fillColor
     $iconLabel.TextAlign = 'MiddleCenter'
-    $iconLabel.SetBounds(2, 0, 32, ($Height - 2))
+    $iconLabel.SetBounds(10, 4, 28, ($Height - 8))
     if ($Kind -eq 'Combo') {
         Initialize-SoftListType
         $editor = New-Object DeskSoftList
@@ -801,7 +996,7 @@ function New-SoftField {
         $valueLabel.AutoEllipsis = $true
         $valueLabel.TextAlign = 'MiddleLeft'
         $valueLabel.Cursor = [System.Windows.Forms.Cursors]::Hand
-        $valueLabel.SetBounds(36, 2, ($Width - 78), ($Height - 6))
+        $valueLabel.SetBounds(40, 4, ($Width - 84), ($Height - 8))
         $chevron = New-Object System.Windows.Forms.Label
         $chevron.Text = [string][char]0x2304
         $chevron.Font = $script:FieldFont
@@ -809,7 +1004,7 @@ function New-SoftField {
         $chevron.BackColor = $fillColor
         $chevron.TextAlign = 'MiddleCenter'
         $chevron.Cursor = [System.Windows.Forms.Cursors]::Hand
-        $chevron.SetBounds(($Width - 36), 2, 28, ($Height - 6))
+        $chevron.SetBounds(($Width - 34), 4, 22, ($Height - 8))
         $syncCaption = {
             $caption = ''
             if ($editor.SelectedIndex -ge 0 -and $editor.SelectedIndex -lt $editor.Items.Count) {
@@ -839,14 +1034,14 @@ function New-SoftField {
         $editor.BackColor = $fillColor
         $editor.ForeColor = $ink
         $editor.AcceptsReturn = $true
-        $editor.SetBounds(36, 8, ($Width - 52), ($Height - 18))
+        $editor.SetBounds(40, 10, ($Width - 56), ($Height - 20))
     } else {
         $editor = New-Object System.Windows.Forms.TextBox
         $editor.BorderStyle = 'None'
         $editor.Font = $script:FieldFont
         $editor.BackColor = $fillColor
         $editor.ForeColor = $ink
-        $editor.SetBounds(36, 9, ($Width - 52), 22)
+        $editor.SetBounds(40, 10, ($Width - 56), 20)
         if ($ReadOnly) {
             $editor.ReadOnly = $true
             $editor.TabStop = $false
@@ -1070,7 +1265,8 @@ function Set-TicketFieldLayout {
         $ui.BodyHost.SetBounds(16, 338, $fieldW, 56)
         $ui.TicketStatus.SetBounds(16, 398, $fieldW, 16)
         $ui.SendButton.SetBounds(16, 416, $fieldW, 44)
-        $ui.PortalLink.SetBounds(16, 464, 240, 16)
+        $ui.PortalLink.TextAlign = 'MiddleCenter'
+        $ui.PortalLink.SetBounds(16, 460, $fieldW, 20)
     } else {
         $ui.CategoryLabel.Text = 'Категория'
         $ui.CategoryLabel.SetBounds(16, 130, $fieldW, 14)
@@ -1082,7 +1278,8 @@ function Set-TicketFieldLayout {
         $ui.BodyHost.SetBounds(16, 274, $fieldW, 104)
         $ui.TicketStatus.SetBounds(16, 384, $fieldW, 16)
         $ui.SendButton.SetBounds(16, 402, $fieldW, 44)
-        $ui.PortalLink.SetBounds(16, 450, 240, 16)
+        $ui.PortalLink.TextAlign = 'MiddleCenter'
+        $ui.PortalLink.SetBounds(16, 450, $fieldW, 22)
     }
     Update-FlatButtonRegion $ui.SendButton
 }
@@ -1152,7 +1349,7 @@ function Apply-SupportPageVisual {
         $ui.TicketTab.Font = $script:TabFontBold
         $ui.TabLine.SetBounds(20, 31, 52, 2)
         $session = Get-WindowsSessionIdentity
-        $ui.LoginBox.Text = [string]$session.Login
+        $ui.LoginBox.Text = Format-WindowsAccount ([string]$session.Login)
         $ui.ComputerBox.Text = [string]$session.Computer
     }
 }
@@ -1174,7 +1371,7 @@ function Update-WidgetChrome {
     $ui.Status.Text = [string]$status.Text
     $ui.Status.ForeColor = $status.Color
     $session = Get-WindowsSessionIdentity
-    $login = [string]$session.Login
+    $login = Format-WindowsAccount ([string]$session.Login)
     $computer = [string]$session.Computer
     $identity = $login
     if (-not [string]::IsNullOrWhiteSpace($computer)) {
@@ -1225,6 +1422,7 @@ function Show-SupportPanel {
     Set-SupportBounds
     if (-not $script:PanelForm.Visible) { $script:PanelForm.Show() }
     try { $script:PanelForm.Activate() } catch { }
+    Enable-SmoothFrame $script:PanelForm
     if ('DesktopHost' -as [type]) {
         try { [DesktopHost]::PreparePanel($script:PanelForm.Handle) } catch { }
     }
@@ -1250,10 +1448,11 @@ function New-LauncherButton {
     $form.Add_Paint({
         $g = $_.Graphics
         $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
         $fill = Get-ThemeColor Accent
         if ($script:LauncherHot) { $fill = Get-ThemeColor AccentHover }
         $brush = New-Object System.Drawing.SolidBrush $fill
-        $g.FillEllipse($brush, 0, 0, 51, 51)
+        $g.FillEllipse($brush, 1, 1, 50, 50)
         $brush.Dispose()
         $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White, 1.6)
         if ($script:PanelOpen) {
@@ -1340,17 +1539,34 @@ function New-SupportPanel {
     $trimmedTitle = $titleText.Trim()
     if ($trimmedTitle.Length -gt 0) { $markText = $trimmedTitle.Substring(0, 1).ToUpper() }
     $mark = New-Object System.Windows.Forms.Panel
-    $mark.SetBounds(16, 18, 36, 36)
-    $mark.BackColor = $accent
-    $mark.Region = New-Object System.Drawing.Region((New-RoundedPath -Width 36 -Height 36 -Radius 10))
-    $markLetter = New-Object System.Windows.Forms.Label
-    $markLetter.Text = $markText
-    $markLetter.Font = $script:TitleFont
-    $markLetter.ForeColor = [System.Drawing.Color]::White
-    $markLetter.BackColor = $accent
-    $markLetter.TextAlign = 'MiddleCenter'
-    $markLetter.Dock = 'Fill'
-    $mark.Controls.Add($markLetter)
+    $mark.SetBounds(16, 20, 36, 36)
+    $mark.BackColor = $headerColor
+    $mark.Text = $markText
+    $mark.Font = $script:LogoFont
+    $mark.Add_Paint({
+        $box = $this
+        $g = $_.Graphics
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
+        $g.Clear($box.BackColor)
+        $path = New-RoundedPath -Width 34 -Height 34 -Radius 10
+        $g.TranslateTransform(1, 1)
+        $brush = New-Object System.Drawing.SolidBrush (Get-ThemeColor Accent)
+        $g.FillPath($brush, $path)
+        $brush.Dispose()
+        $path.Dispose()
+        $g.ResetTransform()
+        $font = $box.Font
+        $format = New-Object System.Drawing.StringFormat
+        $format.Alignment = [System.Drawing.StringAlignment]::Center
+        $format.LineAlignment = [System.Drawing.StringAlignment]::Center
+        $ink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
+        $rect = New-Object System.Drawing.RectangleF(1, 2, 34, 32)
+        $g.DrawString([string]$box.Text, $font, $ink, $rect, $format)
+        $ink.Dispose()
+        $format.Dispose()
+    })
     $title = New-Object System.Windows.Forms.Label
     $title.Text = $titleText
     $title.Font = $script:TitleFont
@@ -1372,18 +1588,31 @@ function New-SupportPanel {
     $status.BackColor = $headerColor
     $status.AutoEllipsis = $true
     $status.SetBounds(60, 52, ($panelW - 84), 14)
-    $close = New-Object System.Windows.Forms.Button
-    $close.Text = [string][char]0x00D7
-    $close.SetBounds(($panelW - 40), 12, 28, 24)
-    $close.FlatStyle = 'Flat'
-    $close.FlatAppearance.BorderSize = 0
-    $close.FlatAppearance.MouseOverBackColor = $hover
+    $close = New-Object System.Windows.Forms.Panel
+    $close.SetBounds(($panelW - 48), 18, 28, 28)
     $close.BackColor = $headerColor
-    $close.ForeColor = $muted
-    $close.Font = $script:TitleFont
     $close.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $close.TabStop = $false
+    $close.Add_MouseEnter({ $script:CloseHot = $true; $this.Invalidate() })
+    $close.Add_MouseLeave({ $script:CloseHot = $false; $this.Invalidate() })
     $close.Add_Click({ Hide-SupportPanel })
+    $close.Add_Paint({
+        $box = $this
+        $g = $_.Graphics
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $g.Clear($box.BackColor)
+        if ($script:CloseHot) {
+            $hot = New-Object System.Drawing.SolidBrush (Get-ThemeColor Hover)
+            $g.FillEllipse($hot, 1, 1, 26, 26)
+            $hot.Dispose()
+        }
+        $pen = New-Object System.Drawing.Pen (Get-ThemeColor Muted), 1.6
+        $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+        $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+        $g.DrawLine($pen, 9, 9, 19, 19)
+        $g.DrawLine($pen, 19, 9, 9, 19)
+        $pen.Dispose()
+    })
     $header.Controls.Add($mark)
     $header.Controls.Add($title)
     $header.Controls.Add($identity)
@@ -1531,7 +1760,10 @@ function New-SupportPanel {
     $portalLink.ActiveLinkColor = $accent
     $portalLink.LinkBehavior = 'HoverUnderline'
     $portalLink.BackColor = $headerColor
-    $portalLink.SetBounds(16, 450, 240, 16)
+    $portalLink.AutoSize = $false
+    $portalLink.TextAlign = 'MiddleCenter'
+    $portalLink.UseCompatibleTextRendering = $true
+    $portalLink.SetBounds(16, 450, $fieldW, 22)
     $portalLink.Visible = $false
     $portalLink.Add_LinkClicked({
         $portalUrl = Get-WidgetPortalUrl
@@ -1581,6 +1813,7 @@ function New-SupportPanel {
         Sheet = $sheet
         TitleLabel = $title
         CloseButton = $close
+        Mark = $mark
         HeaderRule = $headerRule
         Status = $status
         Identity = $identity

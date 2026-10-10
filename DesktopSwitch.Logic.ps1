@@ -917,6 +917,18 @@ function Format-WindowsLogin {
     return $account
 }
 
+function Format-WindowsAccount {
+    param([string]$Login)
+    $value = ''
+    if ($null -ne $Login) { $value = $Login.Trim() }
+    if ([string]::IsNullOrWhiteSpace($value)) { return '' }
+    $slash = $value.LastIndexOf('\')
+    if ($slash -ge 0 -and $slash -lt ($value.Length - 1)) { return $value.Substring($slash + 1) }
+    $at = $value.IndexOf('@')
+    if ($at -gt 0) { return $value.Substring(0, $at) }
+    return $value
+}
+
 function Get-WindowsSessionIdentity {
     $identityName = ''
     try {
