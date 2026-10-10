@@ -1,0 +1,27 @@
+﻿{
+  "Note": "Скопируйте этот файл в config.json. Замените \\\\CHANGE-ME\\... на UNC общей папки рабочего стола и поставьте Enabled в true. Саму программу положите на локальный диск, иначе при обрыве сети она не сможет запуститься.",
+  "Enabled": false,
+  "NetworkDesktopPath": "\\\\CHANGE-ME\\DesktopShare\\Desktop",
+  "LocalDesktopPath": "%LOCALAPPDATA%\\DesktopSwitch\\LocalDesktop",
+  "Trigger": "InternetOrShare",
+  "CheckIntervalSeconds": 15,
+  "FailuresBeforeSwitch": 2,
+  "SuccessesBeforeRestore": 3,
+  "RestoreWhenOnline": true,
+  "RestartExplorer": true,
+  "NotifyUser": true,
+  "SyncShortcutsWhileOnline": true,
+  "SyncExtensions": [".lnk", ".url"],
+  "InternetCheck": {
+    "UseWindowsConnectivity": true,
+    "ProbeUrls": [
+      "http://www.msftconnecttest.com/connecttest.txt"
+    ],
+    "ExpectedProbeBody": "Microsoft Connect Test",
+    "ProbeTimeoutSeconds": 5
+  },
+  "ShareProbeTimeoutSeconds": 4,
+  "LogPath": "%LOCALAPPDATA%\\DesktopSwitch\\desktop-switch.log",
+  "StatePath": "%LOCALAPPDATA%\\DesktopSwitch\\state.json",
+  "MaxLogBytes": 1048576
+}
