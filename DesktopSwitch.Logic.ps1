@@ -710,6 +710,48 @@ function Test-TicketDraft {
     return ,$errors
 }
 
+function Format-WindowsLogin {
+    param([string]$IdentityName, [string]$Domain, [string]$User)
+    if (-not [string]::IsNullOrWhiteSpace($IdentityName)) { return $IdentityName.Trim() }
+    $account = ''
+    $realm = ''
+    if ($null -ne $User) { $account = $User.Trim() }
+    if ($null -ne $Domain) { $realm = $Domain.Trim() }
+    if (-not [string]::IsNullOrWhiteSpace($realm) -and -not [string]::IsNullOrWhiteSpace($account)) {
+        return ('{0}\{1}' -f $realm, $account)
+    }
+    return $account
+}
+
+function Get-WindowsSessionIdentity {
+    $identityName = ''
+    try {
+        $current = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        if ($null -ne $current) { $identityName = [string]$current.Name }
+    } catch {
+        $identityName = ''
+    }
+    $computer = [string]$env:COMPUTERNAME
+    if ([string]::IsNullOrWhiteSpace($computer)) {
+        try { $computer = [System.Net.Dns]::GetHostName() } catch { $computer = '' }
+    }
+    if ($null -eq $computer) { $computer = '' }
+    return [pscustomobject]@{
+        Login = Format-WindowsLogin -IdentityName $identityName -Domain ([string]$env:USERDOMAIN) -User ([string]$env:USERNAME)
+        Computer = $computer.Trim()
+    }
+}
+
+function Expand-ServiceDeskUrl {
+    param([string]$Url, [string]$Login, [string]$Computer)
+    if ([string]::IsNullOrWhiteSpace($Url)) { return '' }
+    $safeLogin = ''
+    $safeComputer = ''
+    if ($null -ne $Login) { $safeLogin = [Uri]::EscapeDataString($Login) }
+    if ($null -ne $Computer) { $safeComputer = [Uri]::EscapeDataString($Computer) }
+    return $Url.Replace('{login}', $safeLogin).Replace('{computer}', $safeComputer)
+}
+
 function New-TicketPayload {
     param(
         [string]$Subject,
@@ -719,12 +761,16 @@ function New-TicketPayload {
         [string]$Computer,
         [string]$CreatedAt
     )
+    $userName = ''
+    $pc = ''
+    if ($null -ne $User) { $userName = $User.Trim() }
+    if ($null -ne $Computer) { $pc = $Computer.Trim() }
     return [pscustomobject]@{
         subject = $Subject.Trim()
         body = $Body.Trim()
         category = $Category.Trim()
-        user = $User
-        computer = $Computer
+        user = $userName
+        computer = $pc
         createdAt = $CreatedAt
     }
 }

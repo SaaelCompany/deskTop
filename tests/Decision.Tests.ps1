@@ -291,9 +291,33 @@ $ticketErrors = Test-TicketDraft -Subject 'ab' -Body '1234'
 Assert-True 'short ticket rejected' ($ticketErrors.Count -ge 2)
 $validTicket = Test-TicketDraft -Subject 'Не печатает' -Body 'Принтер на третьем этаже'
 Assert-Equal 'valid ticket' $validTicket.Count 0
-$payload = New-TicketPayload -Subject ' Не печатает ' -Body 'Принтер молчит' -Category 'Инцидент' -User 'ivan' -Computer 'PC-1' -CreatedAt '2026-10-10T12:00:00'
+$payload = New-TicketPayload -Subject ' Не печатает ' -Body 'Принтер молчит' -Category 'Инцидент' -User ' CONTOSO\ivan ' -Computer ' PC-1 ' -CreatedAt '2026-10-10T12:00:00'
 Assert-Equal 'ticket subject trimmed' $payload.subject 'Не печатает'
-Assert-Equal 'ticket user' $payload.user 'ivan'
+Assert-Equal 'ticket user' $payload.user 'CONTOSO\ivan'
+Assert-Equal 'ticket computer' $payload.computer 'PC-1'
+Assert-Equal 'domain login from identity' (Format-WindowsLogin -IdentityName 'CONTOSO\ivan' -Domain 'OTHER' -User 'other') 'CONTOSO\ivan'
+Assert-Equal 'domain login from environment' (Format-WindowsLogin -IdentityName '' -Domain 'CONTOSO' -User 'ivan') 'CONTOSO\ivan'
+Assert-Equal 'local login fallback' (Format-WindowsLogin -IdentityName '' -Domain '' -User 'ivan') 'ivan'
+$deskUrl = Expand-ServiceDeskUrl -Url 'https://sd.example/new?user={login}&pc={computer}' -Login 'CONTOSO\ivan' -Computer 'PC-1'
+Assert-Equal 'portal placeholders' $deskUrl 'https://sd.example/new?user=CONTOSO%5Civan&pc=PC-1'
+$savedUser = $env:USERNAME
+$savedDomain = $env:USERDOMAIN
+$savedComputer = $env:COMPUTERNAME
+try {
+    $env:USERNAME = 'ivan'
+    $env:USERDOMAIN = 'CONTOSO'
+    $env:COMPUTERNAME = 'PC-1'
+    $session = Get-WindowsSessionIdentity
+} finally {
+    if ($null -eq $savedUser) { Remove-Item Env:USERNAME -ErrorAction SilentlyContinue } else { $env:USERNAME = $savedUser }
+    if ($null -eq $savedDomain) { Remove-Item Env:USERDOMAIN -ErrorAction SilentlyContinue } else { $env:USERDOMAIN = $savedDomain }
+    if ($null -eq $savedComputer) { Remove-Item Env:COMPUTERNAME -ErrorAction SilentlyContinue } else { $env:COMPUTERNAME = $savedComputer }
+}
+Assert-True 'session has login' (-not [string]::IsNullOrWhiteSpace([string]$session.Login))
+Assert-True 'session has computer' (-not [string]::IsNullOrWhiteSpace([string]$session.Computer))
+if ([string]$session.Login -eq 'CONTOSO\ivan') {
+    Assert-Equal 'session computer from environment' $session.Computer 'PC-1'
+}
 $widgetCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{
     Widget = [pscustomobject]@{
         ServiceDeskUrl = 'not a url'

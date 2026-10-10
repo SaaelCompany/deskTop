@@ -168,6 +168,8 @@ function Update-WidgetChrome {
     }
     $script:WidgetUi.Status.Text = $status
     $script:WidgetUi.Status.ForeColor = $statusColor
+    $session = Get-WindowsSessionIdentity
+    $script:WidgetUi.Identity.Text = ('{0}  ·  {1}' -f $session.Login, $session.Computer)
 
     $headline = Get-WidgetHeadline $script:NewsItems
     $showMaintenance = [string]$headline.Kind -eq 'maintenance'
@@ -176,7 +178,7 @@ function Update-WidgetChrome {
     if ($showMaintenance) { $script:WidgetUi.News.Text = 'Откройте новости, чтобы прочитать подробности.' }
     else { $script:WidgetUi.News.Text = [string]$headline.Title }
 
-    $y = 74
+    $y = 92
     if ($showMaintenance) {
         $script:WidgetUi.Maintenance.SetBounds(12, $y, 316, 36)
         $y = 116
@@ -240,8 +242,12 @@ function New-DesktopWidget {
 
     $status = New-Object System.Windows.Forms.Label
     $status.Text = 'Проверка сети'
-    $status.SetBounds(12, 48, 316, 20)
+    $status.SetBounds(12, 46, 316, 18)
     $status.ForeColor = [System.Drawing.Color]::FromArgb(93, 109, 126)
+    $identity = New-Object System.Windows.Forms.Label
+    $identity.Text = ''
+    $identity.SetBounds(12, 66, 316, 18)
+    $identity.ForeColor = [System.Drawing.Color]::FromArgb(93, 109, 126)
 
     $maintenance = New-Object System.Windows.Forms.Label
     $maintenance.Visible = $false
@@ -264,6 +270,7 @@ function New-DesktopWidget {
 
     $form.Controls.Add($header)
     $form.Controls.Add($status)
+    $form.Controls.Add($identity)
     $form.Controls.Add($maintenance)
     $form.Controls.Add($news)
     $form.Controls.Add($ticketButton)
@@ -279,6 +286,7 @@ function New-DesktopWidget {
     $script:WidgetForm = $form
     $script:WidgetUi = @{
         Status = $status
+        Identity = $identity
         Maintenance = $maintenance
         News = $news
         TicketButton = $ticketButton
@@ -482,8 +490,9 @@ function Show-TicketDialog {
         $api = [string]$script:Cfg.ServiceDeskApiUrl
         $portal = [string]$script:Cfg.ServiceDeskUrl
     }
+    $session = Get-WindowsSessionIdentity
     if ([string]::IsNullOrWhiteSpace($api) -and -not [string]::IsNullOrWhiteSpace($portal)) {
-        Start-Process $portal
+        Start-Process (Expand-ServiceDeskUrl -Url $portal -Login $session.Login -Computer $session.Computer)
         return
     }
     if ([string]::IsNullOrWhiteSpace($api)) {
@@ -495,44 +504,66 @@ function Show-TicketDialog {
     $dialog.Text = 'Заявка в сервис-деск'
     $dialog.StartPosition = 'CenterScreen'
     $dialog.TopMost = $true
-    $dialog.ClientSize = New-Object System.Drawing.Size(460, 360)
+    $dialog.ClientSize = New-Object System.Drawing.Size(460, 430)
     $dialog.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+    $loginLabel = New-Object System.Windows.Forms.Label
+    $loginLabel.Text = 'Логин Windows'
+    $loginLabel.SetBounds(12, 12, 210, 18)
+    $loginBox = New-Object System.Windows.Forms.TextBox
+    $loginBox.ReadOnly = $true
+    $loginBox.TabStop = $false
+    $loginBox.Text = $session.Login
+    $loginBox.SetBounds(12, 32, 210, 24)
+    $computerLabel = New-Object System.Windows.Forms.Label
+    $computerLabel.Text = 'Компьютер'
+    $computerLabel.SetBounds(234, 12, 210, 18)
+    $computerBox = New-Object System.Windows.Forms.TextBox
+    $computerBox.ReadOnly = $true
+    $computerBox.TabStop = $false
+    $computerBox.Text = $session.Computer
+    $computerBox.SetBounds(234, 32, 214, 24)
     $categoryLabel = New-Object System.Windows.Forms.Label
     $categoryLabel.Text = 'Категория'
-    $categoryLabel.SetBounds(12, 12, 430, 18)
+    $categoryLabel.SetBounds(12, 64, 430, 18)
     $category = New-Object System.Windows.Forms.ComboBox
     $category.DropDownStyle = 'DropDownList'
     [void]$category.Items.Add('Инцидент')
     [void]$category.Items.Add('Запрос обслуживания')
     [void]$category.Items.Add('Вопрос')
     $category.SelectedIndex = 0
-    $category.SetBounds(12, 32, 436, 24)
+    $category.SetBounds(12, 84, 436, 24)
     $subjectLabel = New-Object System.Windows.Forms.Label
     $subjectLabel.Text = 'Тема'
-    $subjectLabel.SetBounds(12, 64, 430, 18)
+    $subjectLabel.SetBounds(12, 116, 430, 18)
     $subject = New-Object System.Windows.Forms.TextBox
-    $subject.SetBounds(12, 84, 436, 24)
+    $subject.SetBounds(12, 136, 436, 24)
     $bodyLabel = New-Object System.Windows.Forms.Label
     $bodyLabel.Text = 'Описание'
-    $bodyLabel.SetBounds(12, 116, 430, 18)
+    $bodyLabel.SetBounds(12, 168, 430, 18)
     $body = New-Object System.Windows.Forms.TextBox
     $body.Multiline = $true
     $body.ScrollBars = 'Vertical'
-    $body.SetBounds(12, 136, 436, 150)
-    $send = New-FlatButton -Text 'Отправить' -Location (New-Object System.Drawing.Point(12, 304)) -Size (New-Object System.Drawing.Size(140, 32))
-    $portalButton = New-FlatButton -Text 'Открыть портал' -Location (New-Object System.Drawing.Point(164, 304)) -Size (New-Object System.Drawing.Size(150, 32))
+    $body.SetBounds(12, 188, 436, 150)
+    $send = New-FlatButton -Text 'Отправить' -Location (New-Object System.Drawing.Point(12, 356)) -Size (New-Object System.Drawing.Size(140, 32))
+    $portalButton = New-FlatButton -Text 'Открыть портал' -Location (New-Object System.Drawing.Point(164, 356)) -Size (New-Object System.Drawing.Size(150, 32))
     $portalButton.Visible = -not [string]::IsNullOrWhiteSpace($portal)
-    $portalButton.Add_Click({ if (-not [string]::IsNullOrWhiteSpace($portal)) { Start-Process $portal } })
+    $portalButton.Add_Click({
+        if (-not [string]::IsNullOrWhiteSpace($portal)) {
+            $who = Get-WindowsSessionIdentity
+            Start-Process (Expand-ServiceDeskUrl -Url $portal -Login $who.Login -Computer $who.Computer)
+        }
+    })
     $send.Add_Click({
         $errors = Test-TicketDraft -Subject $subject.Text -Body $body.Text
         if ($errors.Count -gt 0) {
             [System.Windows.Forms.MessageBox]::Show([string]::Join("`n", @($errors)), 'Заявка') | Out-Null
             return
         }
-        $payload = New-TicketPayload -Subject $subject.Text -Body $body.Text -Category ([string]$category.SelectedItem) -User $env:USERNAME -Computer $env:COMPUTERNAME -CreatedAt ((Get-Date).ToString('o'))
+        $who = Get-WindowsSessionIdentity
+        $payload = New-TicketPayload -Subject $subject.Text -Body $body.Text -Category ([string]$category.SelectedItem) -User $who.Login -Computer $who.Computer -CreatedAt ((Get-Date).ToString('o'))
         try {
             $code = Send-TicketRequest $payload
-            Write-Log ("Заявка отправлена, ответ сервис-деска: {0}, категория: {1}." -f $code, $payload.category)
+            Write-Log ("Заявка отправлена, ответ сервис-деска: {0}, категория: {1}, пользователь: {2}, компьютер: {3}." -f $code, $payload.category, $payload.user, $payload.computer)
             [System.Windows.Forms.MessageBox]::Show('Заявка отправлена.', 'Заявка') | Out-Null
             $dialog.Close()
         } catch {
@@ -540,6 +571,10 @@ function Show-TicketDialog {
             [System.Windows.Forms.MessageBox]::Show('Сервис-деск не принял заявку. Попробуйте ещё раз или откройте портал.', 'Заявка') | Out-Null
         }
     })
+    $dialog.Controls.Add($loginLabel)
+    $dialog.Controls.Add($loginBox)
+    $dialog.Controls.Add($computerLabel)
+    $dialog.Controls.Add($computerBox)
     $dialog.Controls.Add($categoryLabel)
     $dialog.Controls.Add($category)
     $dialog.Controls.Add($subjectLabel)

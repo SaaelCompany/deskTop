@@ -620,6 +620,9 @@ function Show-StatusReport {
     Write-Host ("Сетевая папка: {0}" -f (Format-StatusWord $share))
     Write-Host ("Итог: {0}" -f (Format-StatusWord $verdict))
     Write-Host ("Режим: {0}" -f (Format-StatusWord $mode))
+    $session = Get-WindowsSessionIdentity
+    Write-Host ("Пользователь: {0}" -f $session.Login)
+    Write-Host ("Компьютер: {0}" -f $session.Computer)
     Write-Host ("Журнал: {0}" -f $script:LogFile)
     foreach ($item in $errors) { Write-Host ("Ошибка настройки: {0}" -f $item) }
 }
@@ -782,7 +785,8 @@ try {
     if ($Once) {
         Invoke-MonitorCycle
     } else {
-        Write-Log ("DesktopSwitch {0} запущен. Пользователь={1} компьютер={2} условие={3} интервал={4}с." -f $script:Version, $env:USERNAME, $env:COMPUTERNAME, $script:Cfg.Trigger, $script:Cfg.CheckIntervalSeconds)
+        $session = Get-WindowsSessionIdentity
+        Write-Log ("DesktopSwitch {0} запущен. Пользователь={1} компьютер={2} условие={3} интервал={4}с." -f $script:Version, $session.Login, $session.Computer, $script:Cfg.Trigger, $script:Cfg.CheckIntervalSeconds)
         if ($script:Cfg.WidgetEnabled) {
             Start-WidgetApplication
         } else {
