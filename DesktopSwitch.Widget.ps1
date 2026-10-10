@@ -181,7 +181,7 @@ function Update-WidgetChrome {
     $y = 92
     if ($showMaintenance) {
         $script:WidgetUi.Maintenance.SetBounds(12, $y, 316, 36)
-        $y = 116
+        $y += 40
     }
     $script:WidgetUi.News.SetBounds(12, $y, 316, 40)
     $y += 46
