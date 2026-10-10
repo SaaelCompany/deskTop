@@ -295,6 +295,10 @@ $payload = New-TicketPayload -Subject ' Не печатает ' -Body 'Прин�
 Assert-Equal 'ticket subject trimmed' $payload.subject 'Не печатает'
 Assert-Equal 'ticket user' $payload.user 'CONTOSO\ivan'
 Assert-Equal 'ticket computer' $payload.computer 'PC-1'
+Assert-Equal 'ticket project empty by default' $payload.project ''
+$routed = New-TicketPayload -Subject 'Не печатает' -Body 'Принтер молчит' -Category 'Инцидент' -Project ' IT Helpdesk ' -ProjectId ' ITHD ' -User 'CONTOSO\ivan' -Computer 'PC-1' -CreatedAt '2026-10-10T12:00:00'
+Assert-Equal 'ticket project' $routed.project 'IT Helpdesk'
+Assert-Equal 'ticket project id' $routed.projectId 'ITHD'
 Assert-Equal 'domain login from identity' (Format-WindowsLogin -IdentityName 'CONTOSO\ivan' -Domain 'OTHER' -User 'other') 'CONTOSO\ivan'
 Assert-Equal 'domain login from environment' (Format-WindowsLogin -IdentityName '' -Domain 'CONTOSO' -User 'ivan') 'CONTOSO\ivan'
 Assert-Equal 'local login fallback' (Format-WindowsLogin -IdentityName '' -Domain '' -User 'ivan') 'ivan'
@@ -367,6 +371,24 @@ $otherDesk = Get-EffectiveDesktopConfig ([pscustomobject]@{
 Assert-Equal 'explicit webhook' $otherDesk.ServiceDeskProvider 'Webhook'
 Assert-Equal 'custom category' $otherDesk.ServiceDeskCategories[0] 'Принтер'
 Assert-Equal 'duplicate category dropped' $otherDesk.ServiceDeskCategories.Count 2
+Assert-Equal 'no project list' $widgetCfg.ServiceDeskProjects.Count 0
+$withProjects = Get-EffectiveDesktopConfig ([pscustomobject]@{
+    Widget = [pscustomobject]@{
+        ServiceDeskApiUrl = 'https://helpdesk.example/api/tickets'
+        Projects = @(
+            [pscustomobject]@{ id = 'ITHD'; name = 'IT Helpdesk' },
+            'Кадры',
+            [pscustomobject]@{ id = 'ITHD'; name = 'Повтор' }
+        )
+    }
+})
+Assert-Equal 'project count' $withProjects.ServiceDeskProjects.Count 2
+Assert-Equal 'project id' $withProjects.ServiceDeskProjects[0].Id 'ITHD'
+Assert-Equal 'project name' $withProjects.ServiceDeskProjects[0].Name 'IT Helpdesk'
+Assert-Equal 'string project' $withProjects.ServiceDeskProjects[1].Id 'Кадры'
+Assert-Equal 'project label' (Format-ServiceDeskProjectLabel $withProjects.ServiceDeskProjects[0]) 'IT Helpdesk (ITHD)'
+$projectUrl = Expand-ServiceDeskUrl -Url 'https://sd.example/{projectId}?user={login}' -Login 'CONTOSO\ivan' -Computer 'PC-1' -Project 'IT Helpdesk' -ProjectId 'ITHD'
+Assert-Equal 'project placeholder' $projectUrl 'https://sd.example/ITHD?user=CONTOSO%5Civan'
 $badJira = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ JiraBaseUrl = 'not a url' } })
 Assert-Equal 'bad jira dropped' $badJira.JiraBaseUrl ''
 $badProvider = $false

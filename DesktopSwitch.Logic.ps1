@@ -189,6 +189,7 @@ function Get-EffectiveDesktopConfig {
     $jiraBaseUrl = Select-SingleHttpUrl (Get-Prop $widget 'JiraBaseUrl' '')
     $serviceDeskProvider = Resolve-ServiceDeskProvider -Requested ([string](Get-Prop $widget 'ServiceDesk' '')) -JiraBaseUrl $jiraBaseUrl -ApiUrl $serviceDeskApi -PortalUrl $serviceDeskUrl
     $serviceDeskCategories = Get-ServiceDeskCategories $widget
+    $serviceDeskProjects = Get-ServiceDeskProjects $widget
 
     return [pscustomobject]@{
         Enabled = ConvertTo-Bool (Get-Prop $Config 'Enabled' $false) $false
@@ -220,6 +221,7 @@ function Get-EffectiveDesktopConfig {
         ServiceDeskToken = ([string](Get-Prop $widget 'ServiceDeskToken' '')).Trim()
         ServiceDeskProvider = $serviceDeskProvider
         ServiceDeskCategories = $serviceDeskCategories
+        ServiceDeskProjects = $serviceDeskProjects
         JiraBaseUrl = $jiraBaseUrl
         NewsUrl = Select-SingleHttpUrl (Get-Prop $widget 'NewsUrl' '')
         NewsPollMinutes = Get-ClampedMinutes (ConvertTo-Int (Get-Prop $widget 'NewsPollMinutes' 10) 10)
@@ -361,6 +363,59 @@ function Get-ServiceDeskCategories {
         $items.Add('Инцидент')
         $items.Add('Запрос обслуживания')
         $items.Add('Вопрос')
+    }
+    return ,$items.ToArray()
+}
+
+function Format-ServiceDeskProjectLabel {
+    param($Project)
+    if ($null -eq $Project) { return '' }
+    $name = ([string](Get-Prop $Project 'Name' '')).Trim()
+    $id = ([string](Get-Prop $Project 'Id' '')).Trim()
+    if ([string]::IsNullOrWhiteSpace($name)) { $name = $id }
+    if ([string]::IsNullOrWhiteSpace($name)) { return '' }
+    if (-not [string]::IsNullOrWhiteSpace($id) -and $name -ne $id) {
+        return ('{0} ({1})' -f $name, $id)
+    }
+    return $name
+}
+
+function Get-ServiceDeskProjects {
+    param($Widget)
+    $items = New-Object System.Collections.Generic.List[object]
+    $seen = @{}
+    $node = Get-Prop $Widget 'Projects' $null
+    $raw = @()
+    if ($null -ne $node) {
+        if ($node -is [System.Array]) { $raw = $node }
+        else { $raw = @($node) }
+    }
+    foreach ($candidate in $raw) {
+        if ($null -eq $candidate) { continue }
+        $id = ''
+        $name = ''
+        if ($candidate -is [string]) {
+            $name = $candidate.Trim()
+            $id = $name
+        } else {
+            $id = ([string](Get-Prop $candidate 'id' '')).Trim()
+            if ([string]::IsNullOrWhiteSpace($id)) { $id = ([string](Get-Prop $candidate 'Id' '')).Trim() }
+            $name = ([string](Get-Prop $candidate 'name' '')).Trim()
+            if ([string]::IsNullOrWhiteSpace($name)) { $name = ([string](Get-Prop $candidate 'Name' '')).Trim() }
+            if ([string]::IsNullOrWhiteSpace($name)) { $name = $id }
+            if ([string]::IsNullOrWhiteSpace($id)) { $id = $name }
+        }
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        if ($name.Length -gt 80) { $name = $name.Substring(0, 80) }
+        if ($id.Length -gt 80) { $id = $id.Substring(0, 80) }
+        $marker = $id.ToLowerInvariant()
+        if ($seen.ContainsKey($marker)) { continue }
+        $seen[$marker] = $true
+        $items.Add([pscustomobject]@{
+            Id = $id
+            Name = $name
+        })
+        if ($items.Count -ge 50) { break }
     }
     return ,$items.ToArray()
 }
@@ -816,13 +871,17 @@ function Get-WindowsSessionIdentity {
 }
 
 function Expand-ServiceDeskUrl {
-    param([string]$Url, [string]$Login, [string]$Computer)
+    param([string]$Url, [string]$Login, [string]$Computer, [string]$Project, [string]$ProjectId)
     if ([string]::IsNullOrWhiteSpace($Url)) { return '' }
     $safeLogin = ''
     $safeComputer = ''
+    $safeProject = ''
+    $safeProjectId = ''
     if ($null -ne $Login) { $safeLogin = [Uri]::EscapeDataString($Login) }
     if ($null -ne $Computer) { $safeComputer = [Uri]::EscapeDataString($Computer) }
-    return $Url.Replace('{login}', $safeLogin).Replace('{computer}', $safeComputer)
+    if ($null -ne $Project) { $safeProject = [Uri]::EscapeDataString($Project) }
+    if ($null -ne $ProjectId) { $safeProjectId = [Uri]::EscapeDataString($ProjectId) }
+    return $Url.Replace('{login}', $safeLogin).Replace('{computer}', $safeComputer).Replace('{project}', $safeProject).Replace('{projectId}', $safeProjectId)
 }
 
 function New-TicketPayload {
@@ -832,16 +891,24 @@ function New-TicketPayload {
         [string]$Category,
         [string]$User,
         [string]$Computer,
-        [string]$CreatedAt
+        [string]$CreatedAt,
+        [string]$Project,
+        [string]$ProjectId
     )
     $userName = ''
     $pc = ''
+    $projectName = ''
+    $projectKey = ''
     if ($null -ne $User) { $userName = $User.Trim() }
     if ($null -ne $Computer) { $pc = $Computer.Trim() }
+    if ($null -ne $Project) { $projectName = $Project.Trim() }
+    if ($null -ne $ProjectId) { $projectKey = $ProjectId.Trim() }
     return [pscustomobject]@{
         subject = $Subject.Trim()
         body = $Body.Trim()
         category = $Category.Trim()
+        project = $projectName
+        projectId = $projectKey
         user = $userName
         computer = $pc
         createdAt = $CreatedAt

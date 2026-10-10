@@ -445,14 +445,40 @@ function Get-WebhookCategoryNames {
     return ,$configured
 }
 
+function Test-WebhookProjectMode {
+    if (Test-JiraTicketMode -or $null -eq $script:Cfg) { return $false }
+    $projects = $script:Cfg.ServiceDeskProjects
+    return ($null -ne $projects -and $projects.Count -gt 0)
+}
+
+function Get-SelectedTicketProject {
+    $empty = [pscustomobject]@{ Name = ''; Id = '' }
+    if ($null -eq $script:WidgetUi) { return $empty }
+    $index = [int]$script:WidgetUi.ProjectBox.SelectedIndex
+    if ($index -lt 0) { return $empty }
+    if (Test-JiraTicketMode) {
+        $desks = $script:JiraDesks
+        if ($null -eq $desks -or $index -ge $desks.Count -or $null -eq $desks[$index]) { return $empty }
+        $desk = $desks[$index]
+        $key = [string]$desk.ProjectKey
+        if ([string]::IsNullOrWhiteSpace($key)) { $key = [string]$desk.Id }
+        return [pscustomobject]@{ Name = [string]$desk.ProjectName; Id = $key }
+    }
+    if (-not (Test-WebhookProjectMode)) { return $empty }
+    $projects = $script:Cfg.ServiceDeskProjects
+    if ($null -eq $projects -or $index -ge $projects.Count -or $null -eq $projects[$index]) { return $empty }
+    return [pscustomobject]@{ Name = [string]$projects[$index].Name; Id = [string]$projects[$index].Id }
+}
+
 function Set-TicketFieldLayout {
-    param([bool]$JiraMode)
+    param([bool]$ShowProject)
     if ($null -eq $script:WidgetUi) { return }
     $ui = $script:WidgetUi
-    $ui.ProjectLabel.Visible = $JiraMode
-    $ui.ProjectBox.Visible = $JiraMode
-    if ($JiraMode) {
-        $ui.CategoryLabel.Text = 'Тип запроса'
+    $ui.ProjectLabel.Visible = $ShowProject
+    $ui.ProjectBox.Visible = $ShowProject
+    if ($ShowProject) {
+        if (Test-JiraTicketMode) { $ui.CategoryLabel.Text = 'Тип запроса' }
+        else { $ui.CategoryLabel.Text = 'Категория' }
         $ui.ProjectLabel.SetBounds(10, 44, 280, 14)
         $ui.ProjectBox.SetBounds(10, 58, 280, 22)
         $ui.CategoryLabel.SetBounds(10, 84, 280, 14)
@@ -487,7 +513,7 @@ function Update-TicketActions {
     $portal = Get-WidgetPortalUrl
     $hasApi = -not [string]::IsNullOrWhiteSpace($api)
     $hasPortal = -not [string]::IsNullOrWhiteSpace($portal)
-    Set-TicketFieldLayout -JiraMode $jira
+    Set-TicketFieldLayout -ShowProject ($jira -or (Test-WebhookProjectMode))
     if ($jira) {
         $ui.PortalLink.Visible = $hasPortal
         $ui.ProjectBox.Enabled = $true
@@ -499,6 +525,7 @@ function Update-TicketActions {
         return
     }
     $ui.PortalLink.Visible = $hasApi -and $hasPortal
+    $ui.ProjectBox.Enabled = $hasApi -or $hasPortal
     $ui.SubjectBox.Enabled = $hasApi
     $ui.BodyBox.Enabled = $hasApi
     $ui.CategoryBox.Enabled = $hasApi
@@ -862,6 +889,13 @@ function New-SupportPanel {
             if (-not [string]::IsNullOrWhiteSpace([string]$name)) { [void]$category.Items.Add([string]$name) }
         }
         if ($category.Items.Count -gt 0) { $category.SelectedIndex = 0 }
+        if ($null -ne $script:Cfg -and $null -ne $script:Cfg.ServiceDeskProjects) {
+            foreach ($projectItem in $script:Cfg.ServiceDeskProjects) {
+                if ($null -eq $projectItem) { continue }
+                [void]$project.Items.Add((Format-ServiceDeskProjectLabel $projectItem))
+            }
+            if ($project.Items.Count -gt 0) { $project.SelectedIndex = 0 }
+        }
     }
     $category.SetBounds(10, 58, 280, 22)
     $subjectLabel = New-Object System.Windows.Forms.Label
@@ -898,7 +932,8 @@ function New-SupportPanel {
         $portalUrl = Get-WidgetPortalUrl
         if ([string]::IsNullOrWhiteSpace($portalUrl)) { return }
         $who = Get-WindowsSessionIdentity
-        Start-Process (Expand-ServiceDeskUrl -Url $portalUrl -Login $who.Login -Computer $who.Computer)
+        $chosen = Get-SelectedTicketProject
+        Start-Process (Expand-ServiceDeskUrl -Url $portalUrl -Login $who.Login -Computer $who.Computer -Project $chosen.Name -ProjectId $chosen.Id)
     })
     $send.Add_Click({ Submit-SupportTicket })
     $ticketPage.Controls.Add($loginLabel)
@@ -1081,10 +1116,15 @@ function Submit-SupportTicket {
     }
     $categoryName = [string]$ui.CategoryBox.SelectedItem
     if ([string]::IsNullOrWhiteSpace($categoryName)) { $categoryName = 'Инцидент' }
-    $payload = New-TicketPayload -Subject ([string]$ui.SubjectBox.Text) -Body ([string]$ui.BodyBox.Text) -Category $categoryName -User $who.Login -Computer $who.Computer -CreatedAt ((Get-Date).ToString('o'))
+    $chosen = Get-SelectedTicketProject
+    if ((Test-WebhookProjectMode) -and [string]::IsNullOrWhiteSpace([string]$chosen.Id)) {
+        Set-TicketStatusMessage -Text 'Выберите проект.' -IsError $true
+        return
+    }
+    $payload = New-TicketPayload -Subject ([string]$ui.SubjectBox.Text) -Body ([string]$ui.BodyBox.Text) -Category $categoryName -Project $chosen.Name -ProjectId $chosen.Id -User $who.Login -Computer $who.Computer -CreatedAt ((Get-Date).ToString('o'))
     try {
         $code = Send-TicketRequest $payload
-        Write-Log ("Заявка отправлена, ответ сервис-деска: {0}, категория: {1}, пользователь: {2}, компьютер: {3}." -f $code, $payload.category, $payload.user, $payload.computer)
+        Write-Log ("Заявка отправлена, ответ сервис-деска: {0}, проект: {1}, категория: {2}, пользователь: {3}, компьютер: {4}." -f $code, $payload.projectId, $payload.category, $payload.user, $payload.computer)
         $ui.SubjectBox.Text = ''
         $ui.BodyBox.Text = ''
         $ui.TicketStatus.ForeColor = [System.Drawing.Color]::FromArgb(25, 111, 61)

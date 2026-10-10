@@ -34,6 +34,7 @@
     "ServiceDeskApiUrl": "",
     "ServiceDeskToken": "",
     "Categories": ["Инцидент", "Запрос обслуживания", "Вопрос"],
+    "Projects": [],
     "JiraBaseUrl": "",
     "NewsUrl": "",
     "NewsPollMinutes": 10
