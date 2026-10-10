@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.7'
+$script:Version = '1.2.8'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -558,6 +558,18 @@ function Format-StatusWord {
     }
 }
 
+function Show-StartupProblem {
+    param([string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) { $Text = 'Программа не запустилась.' }
+    try { Write-Log $Text 'ERROR' } catch { Write-Host $Text }
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        [System.Windows.Forms.MessageBox]::Show($Text, 'Сервисная служба') | Out-Null
+    } catch {
+        Write-Host $Text
+    }
+}
+
 function Enter-SingleInstance {
     $script:Mutex = New-Object System.Threading.Mutex($false, 'Local\DesktopSwitchMonitor')
     $acquired = $false
@@ -778,7 +790,7 @@ if (-not $script:Cfg.Enabled -and -not $WhatIf) {
 
 if (-not $WhatIf) {
     if (-not (Enter-SingleInstance)) {
-        Write-Log 'Монитор уже запущен в этом сеансе.' 'WARN'
+        Show-StartupProblem 'Программа уже запущена в этом сеансе. Посмотрите значок у часов и правый нижний угол. Если окна нет, закройте powershell.exe в диспетчере задач и запустите снова.'
         exit 0
     }
 }
@@ -802,6 +814,9 @@ try {
             }
         }
     }
+} catch {
+    Show-StartupProblem ([string]$_.Exception.ToString())
+    exit 1
 } finally {
     Exit-SingleInstance
 }

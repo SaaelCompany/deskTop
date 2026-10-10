@@ -211,27 +211,18 @@ function Read-AppThemeLight {
 }
 
 function Enable-AppThemeMode {
-    if (-not ('ThemeNative' -as [type])) {
-        try {
-            $native = @'
-using System;
-using System.Runtime.InteropServices;
-public static class ThemeNative {
-    [DllImport("uxtheme.dll", EntryPoint = "#135")]
-    public static extern int SetPreferredAppMode(int mode);
-    [DllImport("uxtheme.dll", EntryPoint = "#136")]
-    public static extern void FlushMenuThemes();
+    # Цвета читаются из реестра и рисуются самим окном.
+    # Не вызываем недокументированные функции uxtheme: на части сборок Windows это закрывает процесс до появления кнопки.
+    return
 }
-'@
-            Add-Type -TypeDefinition $native -ErrorAction Stop
-        } catch {
-            return
-        }
-    }
+
+function New-UiFont {
+    param([string]$Family, [float]$Size, [System.Drawing.FontStyle]$Style = 'Regular')
     try {
-        [ThemeNative]::SetPreferredAppMode(1) | Out-Null
-        [ThemeNative]::FlushMenuThemes()
-    } catch { }
+        return New-Object System.Drawing.Font($Family, $Size, $Style)
+    } catch {
+        return New-Object System.Drawing.Font('Segoe UI', $Size, $Style)
+    }
 }
 
 function Test-ShowLauncher {
@@ -1621,15 +1612,15 @@ function New-DesktopWidget {
     Enable-AppThemeMode
     Sync-WidgetTheme -Force
     if (-not (Initialize-DesktopHost)) { $script:WidgetHost = [IntPtr]::Zero }
-    $script:TabFont = New-Object System.Drawing.Font('Segoe UI', 9)
-    $script:TabFontBold = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
-    $script:TitleFont = New-Object System.Drawing.Font('Segoe UI', 12, [System.Drawing.FontStyle]::Bold)
-    $script:LogoFont = New-Object System.Drawing.Font('Segoe UI', 14, [System.Drawing.FontStyle]::Bold)
-    $script:RowTitleFont = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
-    $script:RowBodyFont = New-Object System.Drawing.Font('Segoe UI', 8)
-    $script:FieldFont = New-Object System.Drawing.Font('Segoe UI', 10)
-    $script:ButtonFont = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
-    $script:IconFont = New-Object System.Drawing.Font('Segoe MDL2 Assets', 12)
+    $script:TabFont = New-UiFont 'Segoe UI' 9
+    $script:TabFontBold = New-UiFont 'Segoe UI' 9 Bold
+    $script:TitleFont = New-UiFont 'Segoe UI' 12 Bold
+    $script:LogoFont = New-UiFont 'Segoe UI' 14 Bold
+    $script:RowTitleFont = New-UiFont 'Segoe UI' 9 Bold
+    $script:RowBodyFont = New-UiFont 'Segoe UI' 8
+    $script:FieldFont = New-UiFont 'Segoe UI' 10
+    $script:ButtonFont = New-UiFont 'Segoe UI' 10 Bold
+    $script:IconFont = New-UiFont 'Segoe MDL2 Assets' 12
     if ($script:PanelForm -and -not $script:PanelForm.IsDisposed) {
         $previousExit = $script:AllowExit
         $script:AllowExit = $true
@@ -2087,7 +2078,10 @@ function Start-WidgetApplication {
     $script:WidgetContext = New-Object System.Windows.Forms.ApplicationContext
     try { Invoke-MonitorCycle } catch { Write-Log ("Сбой цикла: {0}" -f $_.Exception.Message) 'ERROR' }
     try { Update-WidgetNews } catch { Write-Log ("Сбой новостей: {0}" -f $_.Exception.Message) 'ERROR' }
-    try { Ensure-DesktopWidget } catch { Write-Log ("Сбой виджета: {0}" -f $_.Exception.Message) 'ERROR' }
+    try { Ensure-DesktopWidget } catch {
+        Write-Log ("Сбой виджета: {0}" -f $_.Exception.ToString()) 'ERROR'
+        throw
+    }
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = [Math]::Max(5000, ([int]$script:Cfg.CheckIntervalSeconds * 1000))
     $timer.Add_Tick({
