@@ -32,6 +32,11 @@ $script:JiraDesks = @()
 $script:JiraRequestTypes = @()
 $script:JiraLoaded = $false
 $script:JiraLoading = $false
+$script:JiraPower = $null
+$script:JiraAsync = $null
+$script:JiraWait = $null
+$script:JiraJobKind = ''
+$script:TopMenuItem = $null
 $script:WidgetPalette = $null
 $script:AppThemeLight = $true
 $script:LauncherMenuItem = $null
@@ -405,8 +410,8 @@ function Update-LauncherSurface {
     $form = $script:WidgetForm
     if ($null -eq $form -or $form.IsDisposed) { return }
     if (-not $form.IsHandleCreated) { return }
-    $color = Get-ThemeColor Accent
-    if ($script:LauncherHot) { $color = Get-ThemeColor AccentHover }
+    $color = Get-LauncherFill
+    if ($script:LauncherHot) { $color = Get-LauncherFill -Hover }
     $icon = ''
     if ($script:Cfg -and -not [string]::IsNullOrWhiteSpace([string]$script:Cfg.WidgetIcon)) {
         $icon = Resolve-WidgetIconPath ([string]$script:Cfg.WidgetIcon)
@@ -467,6 +472,65 @@ function Get-ThemeColor {
     if ($null -eq $script:WidgetPalette) { $script:WidgetPalette = Get-WidgetPalette -Light $true }
     $rgb = $script:WidgetPalette[$Name]
     return [System.Drawing.Color]::FromArgb([int]$rgb[0], [int]$rgb[1], [int]$rgb[2])
+}
+
+function Get-LauncherFill {
+    param([switch]$Hover)
+    $color = Get-ThemeColor Accent
+    $hex = ''
+    if ($script:Cfg -and $script:Cfg.PSObject.Properties['WidgetColor']) {
+        $hex = [string]$script:Cfg.WidgetColor
+    }
+    if ($hex.Length -eq 7 -and $hex.StartsWith('#')) {
+        $number = 0
+        $parsed = [int]::TryParse($hex.Substring(1), [System.Globalization.NumberStyles]::HexNumber, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$number)
+        if ($parsed) {
+            $color = [System.Drawing.Color]::FromArgb((($number -shr 16) -band 255), (($number -shr 8) -band 255), ($number -band 255))
+        }
+    }
+    if (-not $Hover) { return $color }
+    $red = [int][Math]::Round($color.R * 0.82)
+    $green = [int][Math]::Round($color.G * 0.82)
+    $blue = [int][Math]::Round($color.B * 0.82)
+    return [System.Drawing.Color]::FromArgb($red, $green, $blue)
+}
+
+function Test-StayOnTop {
+    if ($null -eq $script:State) { return $true }
+    if ($script:State -is [System.Collections.IDictionary]) {
+        if (-not $script:State.Contains('StayOnTop')) { return $true }
+        return Resolve-StayOnTop $script:State['StayOnTop']
+    }
+    return Resolve-StayOnTop $script:State.StayOnTop
+}
+
+function Apply-WidgetZOrder {
+    $top = Test-StayOnTop
+    foreach ($form in @($script:WidgetForm, $script:PanelForm, $script:NewsPopup, $script:ListPopup)) {
+        if ($null -eq $form -or $form.IsDisposed) { continue }
+        $form.TopMost = $top
+    }
+}
+
+function Invoke-WindowChrome {
+    param($Form, [switch]$Launcher)
+    if ($null -eq $Form -or $Form.IsDisposed) { return }
+    if (-not $Form.IsHandleCreated) { [void]$Form.Handle }
+    if (-not ('DesktopHost' -as [type])) { return }
+    try {
+        if ($Launcher) { [DesktopHost]::PrepareLauncher($Form.Handle) }
+        else { [DesktopHost]::PreparePanel($Form.Handle) }
+    } catch { }
+}
+
+function Enable-ControlBuffer {
+    param($Control)
+    if ($null -eq $Control) { return }
+    try {
+        $flags = [System.Reflection.BindingFlags]'Instance,NonPublic'
+        $prop = $Control.GetType().GetProperty('DoubleBuffered', $flags)
+        if ($null -ne $prop) { $prop.SetValue($Control, $true, $null) }
+    } catch { }
 }
 
 function Read-AppThemeLight {
@@ -1088,7 +1152,7 @@ function Show-SoftListPopup {
     $form.FormBorderStyle = 'None'
     $form.ShowInTaskbar = $false
     $form.StartPosition = 'Manual'
-    $form.TopMost = $true
+    $form.TopMost = Test-StayOnTop
     $form.BackColor = Get-ThemeColor FieldFill
     $form.ClientSize = New-Object System.Drawing.Size($popupW, $popupH)
     $form.Region = New-Object System.Drawing.Region((New-RoundedPath -Width $popupW -Height $popupH -Radius 12))
@@ -1564,17 +1628,29 @@ function Apply-SupportPageVisual {
         $ui.TicketTab.ForeColor = $muted
         $ui.NewsTab.Font = $script:TabFontBold
         $ui.TicketTab.Font = $script:TabFont
-        $ui.TabLine.SetBounds(132, 31, 52, 2)
+        Update-SupportTabLine -News
     } else {
         $ui.NewsTab.ForeColor = $muted
         $ui.TicketTab.ForeColor = $ink
         $ui.NewsTab.Font = $script:TabFont
         $ui.TicketTab.Font = $script:TabFontBold
-        $ui.TabLine.SetBounds(20, 31, 52, 2)
+        Update-SupportTabLine
         $session = Get-WindowsSessionIdentity
         $ui.LoginBox.Text = Format-WindowsAccount ([string]$session.Login)
         $ui.ComputerBox.Text = [string]$session.Computer
     }
+}
+
+function Update-SupportTabLine {
+    param([switch]$News)
+    if ($null -eq $script:WidgetUi) { return }
+    $panelW = [int]$script:SupportPanelWidth
+    $half = [int]($panelW / 2)
+    $lineW = 64
+    $origin = 0
+    if ($News) { $origin = $half }
+    $x = $origin + [int](($half - $lineW) / 2)
+    $script:WidgetUi.TabLine.SetBounds($x, 30, $lineW, 2)
 }
 
 function Select-SupportPage {
@@ -1634,20 +1710,18 @@ function Hide-SupportPanel {
 function Show-SupportPanel {
     param([string]$Page)
     if ([string]::IsNullOrWhiteSpace($Page)) { $Page = 'Ticket' }
-    Ensure-DesktopWidget
+    if ($null -eq $script:WidgetForm -or $script:WidgetForm.IsDisposed -or -not $script:WidgetForm.IsHandleCreated) {
+        Ensure-DesktopWidget
+    }
     if ($null -eq $script:PanelForm -or $script:PanelForm.IsDisposed) { return }
     $script:PanelOpen = $true
-    Select-SupportPage -Page $Page
     Set-SupportBounds
+    Apply-SupportPageVisual -Page $Page
+    if ($script:WidgetPage -eq 'News') { Mark-NoticesOpened }
     if (-not $script:PanelForm.Visible) { $script:PanelForm.Show() }
     try { $script:PanelForm.Activate() } catch { }
-    if ('DesktopHost' -as [type]) {
-        try { [DesktopHost]::PreparePanel($script:PanelForm.Handle) } catch { }
-    }
     Update-LauncherSurface
-    if ($script:WidgetPage -eq 'Ticket' -and $script:PanelForm -and -not $script:PanelForm.IsDisposed) {
-        $script:PanelForm.BeginInvoke([System.Action]{ Request-JiraCatalogIfTicket }) | Out-Null
-    }
+    Start-JiraCatalogLoad
 }
 
 function New-LauncherButton {
@@ -1655,7 +1729,7 @@ function New-LauncherButton {
     $form.FormBorderStyle = 'None'
     $form.ShowInTaskbar = $false
     $form.StartPosition = 'Manual'
-    $form.TopMost = $true
+    $form.TopMost = Test-StayOnTop
     $form.BackColor = Get-ThemeColor Accent
     $form.ClientSize = New-Object System.Drawing.Size(52, 52)
     $form.Text = Get-WidgetTitle
@@ -1667,8 +1741,8 @@ function New-LauncherButton {
         $g = $_.Graphics
         $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
         $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-        $fill = Get-ThemeColor Accent
-        if ($script:LauncherHot) { $fill = Get-ThemeColor AccentHover }
+        $fill = Get-LauncherFill
+        if ($script:LauncherHot) { $fill = Get-LauncherFill -Hover }
         $brush = New-Object System.Drawing.SolidBrush $fill
         $g.FillEllipse($brush, 0, 0, 51, 51)
         $brush.Dispose()
@@ -1723,7 +1797,7 @@ function New-LauncherButton {
             if ($count -gt 9) { $text = '9' }
             $font = New-Object System.Drawing.Font('Segoe UI', 7, [System.Drawing.FontStyle]::Bold)
             $flags = [System.Windows.Forms.TextFormatFlags]::HorizontalCenter -bor [System.Windows.Forms.TextFormatFlags]::VerticalCenter -bor [System.Windows.Forms.TextFormatFlags]::NoPadding -bor [System.Windows.Forms.TextFormatFlags]::SingleLine
-            [System.Windows.Forms.TextRenderer]::DrawText($g, $text, $font, (New-Object System.Drawing.Rectangle(32, 2, 16, 16)), (Get-ThemeColor Accent), $flags)
+            [System.Windows.Forms.TextRenderer]::DrawText($g, $text, $font, (New-Object System.Drawing.Rectangle(32, 2, 16, 16)), (Get-LauncherFill), $flags)
             $font.Dispose()
         }
     })
@@ -1763,7 +1837,7 @@ function New-SupportPanel {
     $panel.FormBorderStyle = 'None'
     $panel.ShowInTaskbar = $false
     $panel.StartPosition = 'Manual'
-    $panel.TopMost = $true
+    $panel.TopMost = Test-StayOnTop
     $panel.BackColor = $headerColor
     $panel.ClientSize = New-Object System.Drawing.Size($panelW, $panelH)
     $panel.Text = Get-WidgetTitle
@@ -1841,11 +1915,12 @@ function New-SupportPanel {
     $sheet.SetBounds(0, $headerH, $panelW, ($panelH - $headerH))
     $sheet.BackColor = $headerColor
 
+    $half = [int]($panelW / 2)
     $ticketTab = New-Object System.Windows.Forms.Button
     $ticketTab.Text = 'Заявка'
-    $ticketTab.SetBounds(8, 2, 108, 30)
-    $ticketTab.TextAlign = 'MiddleLeft'
-    $ticketTab.Padding = New-Object System.Windows.Forms.Padding(12, 0, 0, 0)
+    $ticketTab.SetBounds(0, 0, $half, 32)
+    $ticketTab.TextAlign = 'MiddleCenter'
+    $ticketTab.Padding = New-Object System.Windows.Forms.Padding(0)
     $ticketTab.FlatStyle = 'Flat'
     $ticketTab.FlatAppearance.BorderSize = 0
     $ticketTab.FlatAppearance.MouseOverBackColor = $hover
@@ -1861,9 +1936,9 @@ function New-SupportPanel {
     })
     $newsTab = New-Object System.Windows.Forms.Button
     $newsTab.Text = 'Новости'
-    $newsTab.SetBounds(116, 2, 140, 30)
-    $newsTab.TextAlign = 'MiddleLeft'
-    $newsTab.Padding = New-Object System.Windows.Forms.Padding(16, 0, 0, 0)
+    $newsTab.SetBounds($half, 0, ($panelW - $half), 32)
+    $newsTab.TextAlign = 'MiddleCenter'
+    $newsTab.Padding = New-Object System.Windows.Forms.Padding(0)
     $newsTab.FlatStyle = 'Flat'
     $newsTab.FlatAppearance.BorderSize = 0
     $newsTab.FlatAppearance.MouseOverBackColor = $hover
@@ -1874,7 +1949,7 @@ function New-SupportPanel {
     $newsTab.Add_Click({ Select-SupportPage -Page News })
     $tabLine = New-Object System.Windows.Forms.Panel
     $tabLine.BackColor = $accent
-    $tabLine.SetBounds(20, 31, 52, 2)
+    $tabLine.SetBounds(58, 30, 64, 2)
 
     $newsPage = New-Object System.Windows.Forms.Panel
     $newsPage.SetBounds(0, $pageY, $panelW, $pageH)
@@ -2017,6 +2092,12 @@ function New-SupportPanel {
     $headerRule.SetBounds(16, ($headerH - 1), ($panelW - 32), 1)
     $headerRule.BackColor = $ruleColor
     $panel.Controls.Add($headerRule)
+    Enable-ControlBuffer $panel
+    Enable-ControlBuffer $header
+    Enable-ControlBuffer $sheet
+    Enable-ControlBuffer $ticketPage
+    Enable-ControlBuffer $newsPage
+    Enable-ControlBuffer $newsList
     $panel.Add_KeyDown({
         if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { Hide-SupportPanel }
     })
@@ -2091,39 +2172,16 @@ function Set-TicketStatusMessage {
     try { $script:WidgetUi.TicketStatus.Refresh() } catch { }
 }
 
-function Ensure-JiraCatalog {
+function Start-JiraCatalogLoad {
     if (-not (Test-JiraTicketMode)) { return }
     if ($script:JiraLoaded -or $script:JiraLoading) { return }
     if ($null -eq $script:WidgetUi) { return }
-    $ui = $script:WidgetUi
-    $script:JiraLoading = $true
-    $loaded = $false
-    try {
-        Set-TicketStatusMessage -Text 'Загружаю проекты Jira...' -IsError $false
-        $ui.ProjectBox.Items.Clear()
-        $ui.CategoryBox.Items.Clear()
-        $script:JiraDesks = Receive-JiraServiceDesks
-        if ($null -eq $script:JiraDesks) { $script:JiraDesks = @() }
-        $script:JiraRequestTypes = @()
-        foreach ($desk in $script:JiraDesks) {
-            if ($null -eq $desk) { continue }
-            [void]$ui.ProjectBox.Items.Add((Format-JiraDeskLabel $desk))
-        }
-        $loaded = $true
-        $script:JiraLoaded = $true
-        if ($ui.ProjectBox.Items.Count -eq 0) {
-            Set-TicketStatusMessage -Text 'В Jira нет доступных проектов helpdesk для этой учётной записи.' -IsError $true
-            return
-        }
-        $ui.ProjectBox.SelectedIndex = 0
-    } catch {
-        $script:JiraLoaded = $false
-        Write-Log ("Проекты Jira не загрузились: {0}" -f $_.Exception.Message) 'WARN'
-        Set-TicketStatusMessage -Text 'Не удалось загрузить проекты Jira.' -IsError $true
-    } finally {
-        $script:JiraLoading = $false
-    }
-    if ($loaded -and $ui.ProjectBox.Items.Count -gt 0) { Load-JiraRequestTypes }
+    Set-TicketStatusMessage -Text 'Загружаю проекты Jira...' -IsError $false
+    Start-JiraWorker -Kind 'desks' -DeskId ''
+}
+
+function Ensure-JiraCatalog {
+    Start-JiraCatalogLoad
 }
 
 function Load-JiraRequestTypes {
@@ -2131,8 +2189,7 @@ function Load-JiraRequestTypes {
     if ($null -eq $script:WidgetUi -or $script:JiraLoading) { return }
     $ui = $script:WidgetUi
     $index = [int]$ui.ProjectBox.SelectedIndex
-    $desks = $script:JiraDesks
-    if ($null -eq $desks) { $desks = @() }
+    $desks = @($script:JiraDesks)
     if ($index -lt 0 -or $index -ge $desks.Count -or $null -eq $desks[$index]) {
         $script:JiraLoading = $true
         try {
@@ -2143,15 +2200,227 @@ function Load-JiraRequestTypes {
         }
         return
     }
-    $desk = $desks[$index]
+    Set-TicketStatusMessage -Text 'Загружаю типы запросов...' -IsError $false
+    Start-JiraWorker -Kind 'types' -DeskId ([string]$desks[$index].Id)
+}
+
+function Start-JiraWorker {
+    param([string]$Kind, [string]$DeskId)
+    if ($script:JiraLoading) { return }
+    if ($null -eq $script:Cfg) { return }
+    $script:JiraLoading = $true
+    $script:JiraJobKind = $Kind
+    $ps = $null
+    try {
+    $logicPath = Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1'
+    $baseUrl = [string]$script:Cfg.JiraBaseUrl
+    $token = [string]$script:Cfg.ServiceDeskToken
+    $ps = [powershell]::Create()
+    [void]$ps.AddScript({
+        param($LogicPath, $BaseUrl, $Token, $DeskId, $Kind)
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version 2.0
+        . $LogicPath
+        function Read-DeskBody {
+            param([string]$Url, [string]$Bearer)
+            $request = [System.Net.HttpWebRequest]::Create($Url)
+            $request.Method = 'GET'
+            $request.Accept = 'application/json'
+            $request.Timeout = 20000
+            $request.ReadWriteTimeout = 20000
+            $request.UserAgent = 'DesktopSwitch'
+            $proxy = [System.Net.WebRequest]::GetSystemWebProxy()
+            $proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
+            $request.Proxy = $proxy
+            $request.Headers.Add('X-ExperimentalApi', 'opt-in')
+            if (-not [string]::IsNullOrWhiteSpace($Bearer)) {
+                $request.Headers.Add('Authorization', 'Bearer ' + $Bearer)
+            } else {
+                $request.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
+                $request.PreAuthenticate = $true
+            }
+            $response = $null
+            $reader = $null
+            try {
+                $response = $request.GetResponse()
+                $reader = New-Object System.IO.StreamReader($response.GetResponseStream(), [System.Text.Encoding]::UTF8)
+                return $reader.ReadToEnd()
+            } catch [System.Net.WebException] {
+                $detail = [string]$_.Exception.Message
+                $errorResponse = $_.Exception.Response
+                if ($null -ne $errorResponse) {
+                    try {
+                        $errorReader = New-Object System.IO.StreamReader($errorResponse.GetResponseStream(), [System.Text.Encoding]::UTF8)
+                        $raw = $errorReader.ReadToEnd()
+                        $errorReader.Close()
+                        $parsed = Get-JiraErrorText $raw
+                        if (-not [string]::IsNullOrWhiteSpace($parsed)) { $detail = $parsed }
+                    } catch { }
+                    try { $errorResponse.Close() } catch { }
+                }
+                throw $detail
+            } finally {
+                if ($null -ne $reader) { $reader.Close() }
+                if ($null -ne $response) { $response.Close() }
+            }
+        }
+        function Read-DeskPages {
+            param([string]$PageKind, [string]$ServiceDeskId)
+            $all = New-Object System.Collections.Generic.List[object]
+            $start = 0
+            $guard = 0
+            while ($guard -lt 20) {
+                $guard++
+                $url = ''
+                if ($PageKind -eq 'types') {
+                    $url = Get-JiraRequestTypeUrl -BaseUrl $BaseUrl -ServiceDeskId $ServiceDeskId -Start $start -Limit 50
+                } else {
+                    $url = Get-JiraServiceDeskUrl -BaseUrl $BaseUrl -Start $start -Limit 50
+                }
+                if ([string]::IsNullOrWhiteSpace($url)) { break }
+                $body = Read-DeskBody -Url $url -Bearer $Token
+                $page = $null
+                if (-not [string]::IsNullOrWhiteSpace($body)) { $page = $body | ConvertFrom-Json }
+                $chunk = @()
+                if ($PageKind -eq 'types') { $chunk = ConvertFrom-JiraRequestTypes $page }
+                else { $chunk = ConvertFrom-JiraServiceDesks $page }
+                foreach ($item in @($chunk)) {
+                    if ($null -ne $item) { $all.Add($item) }
+                }
+                $next = Get-JiraNextStart -Page $page -FallbackStart $start
+                if ($next -lt 0 -or $next -le $start) { break }
+                $start = $next
+            }
+            return ,$all.ToArray()
+        }
+        $deskItems = @()
+        $typeItems = @()
+        if ($Kind -eq 'types') {
+            $typeItems = Read-DeskPages -PageKind 'types' -ServiceDeskId $DeskId
+        } else {
+            $deskItems = Read-DeskPages -PageKind 'desks' -ServiceDeskId ''
+            $firstId = ''
+            if ($deskItems -is [System.Array] -and $deskItems.Length -gt 0 -and $null -ne $deskItems[0]) {
+                $firstId = [string]$deskItems[0].Id
+            }
+            if (-not [string]::IsNullOrWhiteSpace($firstId)) {
+                $typeItems = Read-DeskPages -PageKind 'types' -ServiceDeskId $firstId
+            }
+        }
+        [pscustomobject]@{
+            Ok = $true
+            Desks = $deskItems
+            Types = $typeItems
+            Error = ''
+        }
+    }).AddArgument($logicPath).AddArgument($baseUrl).AddArgument($token).AddArgument($DeskId).AddArgument($Kind)
+    $script:JiraPower = $ps
+    $script:JiraAsync = $ps.BeginInvoke()
+    if ($null -eq $script:JiraWait) {
+        $script:JiraWait = New-Object System.Windows.Forms.Timer
+        $script:JiraWait.Interval = 80
+        $script:JiraWait.Add_Tick({
+            try { Complete-JiraCatalogLoad } catch {
+                $script:JiraLoading = $false
+                Write-Log ("Каталог Jira не применился: {0}" -f $_.Exception.Message) 'WARN'
+            }
+        })
+    }
+    $script:JiraWait.Start()
+    } catch {
+        $script:JiraLoading = $false
+        $script:JiraPower = $null
+        $script:JiraAsync = $null
+        if ($null -ne $ps) { try { $ps.Dispose() } catch { } }
+        Write-Log ("Каталог Jira не запустился: {0}" -f $_.Exception.Message) 'WARN'
+        Set-TicketStatusMessage -Text 'Не удалось загрузить проекты Jira.' -IsError $true
+    }
+}
+
+function Complete-JiraCatalogLoad {
+    if ($null -eq $script:JiraAsync -or -not $script:JiraAsync.IsCompleted) { return }
+    if ($script:JiraWait) { $script:JiraWait.Stop() }
+    $kind = [string]$script:JiraJobKind
+    $power = $script:JiraPower
+    $async = $script:JiraAsync
+    $script:JiraPower = $null
+    $script:JiraAsync = $null
+    $script:JiraLoading = $false
+    $result = $null
+    $errorText = ''
+    try {
+        $output = @($power.EndInvoke($async))
+        if ($output.Count -gt 0) { $result = $output[$output.Count - 1] }
+    } catch {
+        $errorText = [string]$_.Exception.Message
+    } finally {
+        try { $power.Dispose() } catch { }
+    }
+    if ($null -eq $script:WidgetUi) { return }
+    if ($null -ne $result -and $null -ne $result.PSObject.Properties['Error'] -and -not [string]::IsNullOrWhiteSpace([string]$result.Error)) {
+        $errorText = [string]$result.Error
+    }
+    if (-not [string]::IsNullOrWhiteSpace($errorText) -or $null -eq $result) {
+        if ($kind -eq 'types') {
+            Write-Log ("Типы запросов Jira не загрузились: {0}" -f $errorText) 'WARN'
+            Set-TicketStatusMessage -Text 'Не удалось загрузить типы запросов.' -IsError $true
+        } else {
+            $script:JiraLoaded = $false
+            Write-Log ("Проекты Jira не загрузились: {0}" -f $errorText) 'WARN'
+            Set-TicketStatusMessage -Text 'Не удалось загрузить проекты Jira.' -IsError $true
+        }
+        return
+    }
+    if ($kind -eq 'types') {
+        Set-JiraTypeItems -Types $result.Types
+        return
+    }
+    Set-JiraDeskItems -Desks $result.Desks -Types $result.Types
+}
+
+function Set-JiraDeskItems {
+    param($Desks, $Types)
+    if ($null -eq $script:WidgetUi) { return }
+    $ui = $script:WidgetUi
     $script:JiraLoading = $true
     try {
-        Set-TicketStatusMessage -Text 'Загружаю типы запросов...' -IsError $false
-        $script:JiraRequestTypes = Receive-JiraRequestTypes -ServiceDeskId ([string]$desk.Id)
-        if ($null -eq $script:JiraRequestTypes) { $script:JiraRequestTypes = @() }
+        $deskList = New-Object System.Collections.Generic.List[object]
+        foreach ($desk in @($Desks)) {
+            if ($null -ne $desk) { $deskList.Add($desk) }
+        }
+        $script:JiraDesks = $deskList.ToArray()
+        $ui.ProjectBox.Items.Clear()
+        foreach ($desk in $script:JiraDesks) {
+            [void]$ui.ProjectBox.Items.Add((Format-JiraDeskLabel $desk))
+        }
+        $script:JiraLoaded = $true
+        if ($ui.ProjectBox.Items.Count -eq 0) {
+            $script:JiraRequestTypes = @()
+            $ui.CategoryBox.Items.Clear()
+            Set-TicketStatusMessage -Text 'В Jira нет доступных проектов helpdesk для этой учётной записи.' -IsError $true
+            return
+        }
+        $ui.ProjectBox.SelectedIndex = 0
+        Set-JiraTypeItems -Types $Types
+    } finally {
+        $script:JiraLoading = $false
+    }
+}
+
+function Set-JiraTypeItems {
+    param($Types)
+    if ($null -eq $script:WidgetUi) { return }
+    $ui = $script:WidgetUi
+    $wasLoading = [bool]$script:JiraLoading
+    $script:JiraLoading = $true
+    try {
+        $typeList = New-Object System.Collections.Generic.List[object]
+        foreach ($kind in @($Types)) {
+            if ($null -ne $kind) { $typeList.Add($kind) }
+        }
+        $script:JiraRequestTypes = $typeList.ToArray()
         $ui.CategoryBox.Items.Clear()
         foreach ($kind in $script:JiraRequestTypes) {
-            if ($null -eq $kind) { continue }
             $name = [string]$kind.Name
             if ([string]::IsNullOrWhiteSpace($name)) { $name = [string]$kind.Id }
             [void]$ui.CategoryBox.Items.Add($name)
@@ -2162,11 +2431,8 @@ function Load-JiraRequestTypes {
         } else {
             Set-TicketStatusMessage -Text 'Для этого проекта нет типов запросов.' -IsError $true
         }
-    } catch {
-        Write-Log ("Типы запросов Jira не загрузились: {0}" -f $_.Exception.Message) 'WARN'
-        Set-TicketStatusMessage -Text 'Не удалось загрузить типы запросов.' -IsError $true
     } finally {
-        $script:JiraLoading = $false
+        if (-not $wasLoading) { $script:JiraLoading = $false }
     }
 }
 
@@ -2282,9 +2548,10 @@ function New-DesktopWidget {
     Ensure-TrayIcon
     Register-ThemeChanges
     Set-LauncherChrome
-    if ('DesktopHost' -as [type] -and $launcher.IsHandleCreated) {
-        try { [DesktopHost]::PrepareLauncher($launcher.Handle) } catch { }
-    }
+    Invoke-WindowChrome -Form $launcher -Launcher
+    Invoke-WindowChrome -Form $script:PanelForm
+    Apply-WidgetZOrder
+    Start-JiraCatalogLoad
     if (Test-ShowLauncher) { Write-Log 'Кнопка поддержки показана в углу экрана.' }
     else { Write-Log 'Кнопка поддержки скрыта. Программа остаётся у часов.' }
 }
@@ -2314,6 +2581,12 @@ function Ensure-TrayIcon {
     $buttonItem.Checked = Test-ShowLauncher
     $script:LauncherMenuItem = $buttonItem
     [void]$menu.Items.Add($buttonItem)
+    $topItem = New-Object System.Windows.Forms.ToolStripMenuItem
+    $topItem.Text = 'Поверх всех окон'
+    $topItem.CheckOnClick = $true
+    $topItem.Checked = Test-StayOnTop
+    $script:TopMenuItem = $topItem
+    [void]$menu.Items.Add($topItem)
     $exitItem = $menu.Items.Add('Выход')
     $openItem.Add_Click({ Show-SupportPanel -Page $script:WidgetPage })
     $ticketItem.Add_Click({ Show-SupportPanel -Page Ticket })
@@ -2325,6 +2598,14 @@ function Ensure-TrayIcon {
             Save-StateTable $script:State
         }
         Set-LauncherChrome
+    })
+    $topItem.Add_Click({
+        $top = [bool]$script:TopMenuItem.Checked
+        if ($script:State) {
+            $script:State.StayOnTop = $top
+            Save-StateTable $script:State
+        }
+        Apply-WidgetZOrder
     })
     $exitItem.Add_Click({ Stop-DesktopWidgetApp })
     $icon.ContextMenuStrip = $menu
@@ -2430,7 +2711,7 @@ function Ensure-NewsPopup {
     $form.FormBorderStyle = 'None'
     $form.ShowInTaskbar = $false
     $form.StartPosition = 'Manual'
-    $form.TopMost = $true
+    $form.TopMost = Test-StayOnTop
     $form.BackColor = $canvas
     $form.ClientSize = New-Object System.Drawing.Size(280, 120)
     $form.Font = $script:TabFont
@@ -2539,10 +2820,8 @@ function Show-NewsPopup {
     $total = 36 + $bodyHeight
     $script:NewsPopup.ClientSize = New-Object System.Drawing.Size(280, $total)
     $script:NewsPopup.Region = New-Object System.Drawing.Region((New-RoundedPath -Width 280 -Height $total -Radius 14))
+    Invoke-WindowChrome -Form $script:NewsPopup
     if (-not $script:NewsPopup.Visible) { $script:NewsPopup.Show() }
-    if ('DesktopHost' -as [type]) {
-        try { [DesktopHost]::PreparePanel($script:NewsPopup.Handle) } catch { }
-    }
     Set-NewsPopupBounds
 }
 

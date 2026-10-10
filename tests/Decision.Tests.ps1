@@ -351,6 +351,13 @@ Assert-Equal 'theme keeps light on junk' (Resolve-AppThemeLight 'auto') $true
 Assert-Equal 'launcher shown by default' (Resolve-ShowLauncher $null) $true
 Assert-Equal 'launcher can hide' (Resolve-ShowLauncher $false) $false
 Assert-Equal 'launcher hide text' (Resolve-ShowLauncher 'нет') $false
+Assert-Equal 'stay on top by default' (Resolve-StayOnTop $null) $true
+Assert-Equal 'stay on top can hide' (Resolve-StayOnTop $false) $false
+Assert-Equal 'stay on top hide text' (Resolve-StayOnTop 'нет') $false
+Assert-Equal 'color empty' (ConvertTo-WidgetColor '') ''
+Assert-Equal 'color hash' (ConvertTo-WidgetColor '#2f6bff') '#2F6BFF'
+Assert-Equal 'color short' (ConvertTo-WidgetColor '1a4') '#11AA44'
+Assert-Equal 'color junk dropped' (ConvertTo-WidgetColor 'синий') ''
 $lightPalette = Get-WidgetPalette -Light $true
 $darkPalette = Get-WidgetPalette -Light $false
 Assert-Equal 'light card' $lightPalette.Canvas[0] 255
@@ -360,6 +367,9 @@ Assert-True 'dark selection is quiet' ($darkPalette.Selection[1] -lt 90)
 Assert-Equal 'icon empty by default' $widgetCfg.WidgetIcon ''
 $iconCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ Icon = ' icons\chat.png ' } })
 Assert-Equal 'icon path trimmed' $iconCfg.WidgetIcon 'icons\chat.png'
+$colorCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ Color = ' #0E7A4B ' } })
+Assert-Equal 'button color kept' $colorCfg.WidgetColor '#0E7A4B'
+Assert-Equal 'button color empty by default' $widgetCfg.WidgetColor ''
 Assert-Equal 'jira off by default' $widgetCfg.JiraBaseUrl ''
 Assert-Equal 'desk off without urls' $widgetCfg.ServiceDeskProvider 'None'
 Assert-Equal 'default category count' $widgetCfg.ServiceDeskCategories.Count 3

@@ -28,6 +28,7 @@
     "Enabled": true,
     "Title": "Сервисная служба",
     "Icon": "",
+    "Color": "",
     "Corner": "BottomRight",
     "Margin": 16,
     "ServiceDesk": "Auto",

@@ -38,6 +38,26 @@ function Resolve-ShowLauncher {
     return ConvertTo-Bool $Stored $true
 }
 
+function Resolve-StayOnTop {
+    param($Stored)
+    return ConvertTo-Bool $Stored $true
+}
+
+function ConvertTo-WidgetColor {
+    param([string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
+    $clean = $Text.Trim()
+    if ($clean.StartsWith('#')) { $clean = $clean.Substring(1) }
+    if ($clean.Length -eq 3) {
+        $clean = ('' + $clean[0] + $clean[0] + $clean[1] + $clean[1] + $clean[2] + $clean[2])
+    }
+    if ($clean.Length -ne 6) { return '' }
+    $number = 0
+    $parsed = [int]::TryParse($clean, [System.Globalization.NumberStyles]::HexNumber, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$number)
+    if (-not $parsed) { return '' }
+    return ('#{0}' -f $clean.ToUpperInvariant())
+}
+
 function Get-WidgetPalette {
     param([bool]$Light)
     if ($Light) {
@@ -283,6 +303,7 @@ function Get-EffectiveDesktopConfig {
         WidgetEnabled = ConvertTo-Bool (Get-Prop $widget 'Enabled' $true) $true
         WidgetTitle = ([string](Get-Prop $widget 'Title' 'Сервисная служба')).Trim()
         WidgetIcon = ([string](Get-Prop $widget 'Icon' '')).Trim()
+        WidgetColor = ConvertTo-WidgetColor ([string](Get-Prop $widget 'Color' ''))
         WidgetCorner = $cornerMap[$cornerKey]
         WidgetMargin = Get-ClampedMargin (ConvertTo-Int (Get-Prop $widget 'Margin' 16) 16)
         ServiceDeskUrl = $serviceDeskUrl
