@@ -2956,7 +2956,8 @@ function Update-WidgetNews {
     }
     $due = $script:LastNewsPoll -eq [datetime]::MinValue
     if (-not $due) {
-        $due = ((Get-Date) - $script:LastNewsPoll).TotalMinutes -ge [int]$script:Cfg.NewsPollMinutes
+        $waitSeconds = Get-NewsPollSeconds ([int]$script:Cfg.NewsPollMinutes)
+        $due = ((Get-Date) - $script:LastNewsPoll).TotalSeconds -ge $waitSeconds
     }
     if (-not $due) { return }
     $script:LastNewsPoll = Get-Date

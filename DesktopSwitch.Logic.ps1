@@ -482,6 +482,14 @@ function Get-ClampedMinutes {
     return $Minutes
 }
 
+function Get-NewsPollSeconds {
+    param([int]$Minutes)
+    # A ten-minute setting would hide an outage. News is checked at least
+    # every 20 seconds no matter what NewsPollMinutes says.
+    if ($Minutes -lt 1) { return 20 }
+    return 20
+}
+
 function Get-ClampedMargin {
     param([int]$Pixels)
     if ($Pixels -lt 0) { return 0 }

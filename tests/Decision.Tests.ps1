@@ -376,6 +376,8 @@ Assert-Equal 'news url kept' $widgetCfg.NewsUrl 'https://intranet.example/news.j
 Assert-Equal 'news jql empty by default' $widgetCfg.NewsJql ''
 Assert-Equal 'news token empty by default' $widgetCfg.NewsToken ''
 Assert-Equal 'poll floor' $widgetCfg.NewsPollMinutes 1
+Assert-Equal 'news poll ignores ten minutes' (Get-NewsPollSeconds 10) 20
+Assert-Equal 'news poll stays short' (Get-NewsPollSeconds 1) 20
 Assert-Equal 'corner fallback' $widgetCfg.WidgetCorner 'BottomRight'
 Assert-Equal 'widget can be disabled' $widgetCfg.WidgetEnabled $false
 Assert-Equal 'preview off by default' $widgetCfg.Preview $false
