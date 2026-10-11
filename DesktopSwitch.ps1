@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.14'
+$script:Version = '1.2.15'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -394,9 +394,10 @@ function Get-InternetStatus {
         $urls = @($script:Cfg.ProbeUrls | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
     }
     if ($urls.Count -gt 0 -and $windows -ne $true) {
+        $probeTimeout = Get-InternetProbeTimeout -Configured $script:Cfg.ProbeTimeoutSeconds -WindowsInternet $windows
         $results = New-Object System.Collections.Generic.List[bool]
         foreach ($url in $urls) {
-            $results.Add((Test-ProbeUrl -Url $url -TimeoutSec $script:Cfg.ProbeTimeoutSeconds -ExpectedBody $script:Cfg.ExpectedProbeBody))
+            $results.Add((Test-ProbeUrl -Url $url -TimeoutSec $probeTimeout -ExpectedBody $script:Cfg.ExpectedProbeBody))
         }
         $probe = Resolve-ProbeAggregate -Results $results.ToArray()
     }

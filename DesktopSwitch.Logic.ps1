@@ -227,6 +227,13 @@ function Get-ClampedTimeout {
     return $Seconds
 }
 
+function Get-InternetProbeTimeout {
+    param([int]$Configured, $WindowsInternet)
+    $timeout = Get-ClampedTimeout $Configured
+    if ($WindowsInternet -eq $false -and $timeout -gt 2) { return 2 }
+    return $timeout
+}
+
 function Get-ClampedLogBytes {
     param([int]$Bytes)
     $min = 65536
@@ -332,9 +339,9 @@ function Get-EffectiveDesktopConfig {
         NetworkDesktopPath = ([string](Get-Prop $Config 'NetworkDesktopPath' '')).Trim()
         LocalDesktopPath = ConvertTo-ExpandedPath $localRaw
         Trigger = $triggerMap[$triggerKey]
-        CheckIntervalSeconds = Get-ClampedInterval (ConvertTo-Int (Get-Prop $Config 'CheckIntervalSeconds' 15) 15)
+        CheckIntervalSeconds = Get-ClampedInterval (ConvertTo-Int (Get-Prop $Config 'CheckIntervalSeconds' 5) 5)
         FailuresBeforeSwitch = Get-ClampedCount (ConvertTo-Int (Get-Prop $Config 'FailuresBeforeSwitch' 2) 2)
-        SuccessesBeforeRestore = Get-ClampedCount (ConvertTo-Int (Get-Prop $Config 'SuccessesBeforeRestore' 3) 3)
+        SuccessesBeforeRestore = Get-ClampedCount (ConvertTo-Int (Get-Prop $Config 'SuccessesBeforeRestore' 2) 2)
         RestoreWhenOnline = ConvertTo-Bool (Get-Prop $Config 'RestoreWhenOnline' $true) $true
         RestartExplorer = ConvertTo-Bool (Get-Prop $Config 'RestartExplorer' $true) $true
         NotifyUser = ConvertTo-Bool (Get-Prop $Config 'NotifyUser' $true) $true

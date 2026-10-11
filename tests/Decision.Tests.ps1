@@ -197,9 +197,11 @@ Assert-Equal 'first probe' $probes[0] 'http://example.test/a'
 $defaults = Get-EffectiveDesktopConfig ([pscustomobject]@{})
 Assert-Equal 'default disabled' $defaults.Enabled $false
 Assert-Equal 'default trigger' $defaults.Trigger 'InternetOrShare'
-Assert-Equal 'default interval' $defaults.CheckIntervalSeconds 15
+Assert-Equal 'default interval' $defaults.CheckIntervalSeconds 5
 Assert-Equal 'default failures' $defaults.FailuresBeforeSwitch 2
-Assert-Equal 'default successes' $defaults.SuccessesBeforeRestore 3
+Assert-Equal 'default successes' $defaults.SuccessesBeforeRestore 2
+Assert-Equal 'probe stays long while windows is unsure' (Get-InternetProbeTimeout -Configured 5 -WindowsInternet $null) 5
+Assert-Equal 'probe shortens when windows is down' (Get-InternetProbeTimeout -Configured 5 -WindowsInternet $false) 2
 Assert-Equal 'default local' $defaults.LocalDesktopPath 'C:\Users\TestUser\AppData\Local\DesktopSwitch\LocalDesktop'
 Assert-Equal 'default probe count' @($defaults.ProbeUrls).Count 1
 Assert-Equal 'default probe body' $defaults.ExpectedProbeBody 'Microsoft Connect Test'
