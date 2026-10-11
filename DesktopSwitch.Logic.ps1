@@ -1026,6 +1026,16 @@ function ConvertTo-IdList {
     return ,$list
 }
 
+function Test-IsWindowsAdmin {
+    try {
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
+        return [bool]$principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        return $false
+    }
+}
+
 function Get-NoticeField {
     param($Item, [string]$Name)
     if ($null -eq $Item -or [string]::IsNullOrWhiteSpace($Name)) { return '' }

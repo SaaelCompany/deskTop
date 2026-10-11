@@ -45,6 +45,9 @@ $script:WidgetPalette = $null
 $script:AppThemeLight = $true
 $script:LauncherMenuItem = $null
 $script:TrayMenu = $null
+$script:TrayMenuColors = $null
+$script:TrayIconOwned = $false
+$script:LauncherClickHook = $null
 $script:ThemeHooked = $false
 $script:ThemeHandler = $null
 $script:ApplyingTheme = $false
@@ -246,6 +249,10 @@ public static class DeskLayer {
     [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
     [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFOHEADER bmi, uint usage, out IntPtr bits, IntPtr section, uint offset);
     [DllImport("user32.dll")] static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize, IntPtr hdcSrc, ref POINT pptSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool DestroyIcon(IntPtr handle);
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern IntPtr CreateIconFromResourceEx(byte[] bits, uint size, bool icon, uint version, int cx, int cy, uint flags);
     [DllImport("kernel32.dll", EntryPoint = "RtlMoveMemory")]
     static extern void CopyMemory(IntPtr dest, IntPtr src, uint length);
 
@@ -327,7 +334,7 @@ public static class DeskLayer {
                 }
             } else {
             Color disc = fill;
-            if (disc.A < 1) disc = Color.FromArgb(1, fill.R, fill.G, fill.B);
+            if (disc.A < 32) disc = Color.FromArgb(32, fill.R, fill.G, fill.B);
             using (SolidBrush brush = new SolidBrush(disc)) {
                 g.FillEllipse(brush, 0.5f, 0.5f, 51f, 51f);
             }
@@ -409,6 +416,180 @@ public static class DeskLayer {
         }
         return ok;
     }
+
+    public static Icon MakeChatIcon(int fillArgb) {
+        const int size = 32;
+        Color fill = Color.FromArgb(fillArgb);
+        Color accent = Color.FromArgb(255, fill.R, fill.G, fill.B);
+        Bitmap bmp = new Bitmap(size, size, PixelFormat.Format32bppArgb);
+        using (Graphics g = Graphics.FromImage(bmp)) {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.Clear(Color.Transparent);
+            using (SolidBrush brush = new SolidBrush(accent)) {
+                g.FillEllipse(brush, 0.5f, 0.5f, 31f, 31f);
+            }
+            using (Pen pen = new Pen(Color.White, 1.5f)) {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                pen.LineJoin = LineJoin.Round;
+                float s = 32f / 52f;
+                using (GraphicsPath bubble = RoundRect(0f, 0f, 22f * s, 16f * s, 7f * s)) {
+                    g.TranslateTransform(15f * s, 16f * s);
+                    g.DrawPath(pen, bubble);
+                    g.ResetTransform();
+                }
+                g.DrawLine(pen, 22f * s, 31f * s, 19f * s, 36f * s);
+                g.DrawLine(pen, 19f * s, 36f * s, 27f * s, 31f * s);
+            }
+        }
+        IntPtr handle = IntPtr.Zero;
+        try {
+            using (MemoryStream stream = new MemoryStream()) {
+                bmp.Save(stream, ImageFormat.Png);
+                byte[] png = stream.ToArray();
+                handle = CreateIconFromResourceEx(png, (uint)png.Length, true, 0x00030000, size, size, 0);
+            }
+        } catch {
+            handle = IntPtr.Zero;
+        }
+        if (handle == IntPtr.Zero) handle = bmp.GetHicon();
+        bmp.Dispose();
+        if (handle == IntPtr.Zero) return null;
+        return Icon.FromHandle(handle);
+    }
+}
+
+public class DeskClickWindow : NativeWindow {
+    protected override void WndProc(ref Message m) {
+        if (m.Msg == 0x0021) {
+            m.Result = (IntPtr)3;
+            return;
+        }
+        base.WndProc(ref m);
+    }
+}
+
+public class DeskMenuColors : ProfessionalColorTable {
+    public Color Canvas = Color.White;
+    public Color Ink = Color.FromArgb(24, 24, 27);
+    public Color Hover = Color.FromArgb(244, 244, 245);
+    public Color Rule = Color.FromArgb(244, 244, 245);
+    public Color Accent = Color.FromArgb(47, 107, 255);
+    public override Color ToolStripDropDownBackground { get { return Canvas; } }
+    public override Color MenuBorder { get { return Rule; } }
+    public override Color MenuItemBorder { get { return Hover; } }
+    public override Color MenuItemSelected { get { return Hover; } }
+    public override Color MenuItemSelectedGradientBegin { get { return Hover; } }
+    public override Color MenuItemSelectedGradientEnd { get { return Hover; } }
+    public override Color MenuItemPressedGradientBegin { get { return Hover; } }
+    public override Color MenuItemPressedGradientMiddle { get { return Hover; } }
+    public override Color MenuItemPressedGradientEnd { get { return Hover; } }
+    public override Color ImageMarginGradientBegin { get { return Canvas; } }
+    public override Color ImageMarginGradientMiddle { get { return Canvas; } }
+    public override Color ImageMarginGradientEnd { get { return Canvas; } }
+    public override Color ImageMarginRevealedGradientBegin { get { return Canvas; } }
+    public override Color ImageMarginRevealedGradientMiddle { get { return Canvas; } }
+    public override Color ImageMarginRevealedGradientEnd { get { return Canvas; } }
+    public override Color SeparatorDark { get { return Rule; } }
+    public override Color SeparatorLight { get { return Canvas; } }
+    public override Color CheckBackground { get { return Canvas; } }
+    public override Color CheckSelectedBackground { get { return Hover; } }
+    public override Color CheckPressedBackground { get { return Hover; } }
+    public override Color ButtonSelectedHighlight { get { return Hover; } }
+    public override Color ButtonSelectedHighlightBorder { get { return Hover; } }
+    public override Color ButtonSelectedBorder { get { return Hover; } }
+    public override Color ToolStripBorder { get { return Rule; } }
+    public override Color GripDark { get { return Rule; } }
+    public override Color GripLight { get { return Canvas; } }
+}
+
+public class DeskMenuRenderer : ToolStripProfessionalRenderer {
+    public DeskMenuRenderer(DeskMenuColors colors) : base(colors) {
+        RoundedEdges = false;
+    }
+
+    DeskMenuColors Colors { get { return (DeskMenuColors)ColorTable; } }
+
+    static GraphicsPath RoundMenu(float x, float y, float w, float h, float r) {
+        GraphicsPath path = new GraphicsPath();
+        float d = r * 2f;
+        if (d > w) d = w;
+        if (d > h) d = h;
+        if (d < 1f) d = 1f;
+        path.AddArc(x, y, d, d, 180, 90);
+        path.AddArc(x + w - d, y, d, d, 270, 90);
+        path.AddArc(x + w - d, y + h - d, d, d, 0, 90);
+        path.AddArc(x, y + h - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
+    protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e) {
+        e.Graphics.Clear(Colors.Canvas);
+    }
+
+    protected override void OnRenderImageMargin(ToolStripRenderEventArgs e) {
+        using (SolidBrush brush = new SolidBrush(Colors.Canvas)) {
+            e.Graphics.FillRectangle(brush, e.AffectedBounds);
+        }
+    }
+
+    protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e) {
+        Graphics g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        Rectangle b = e.AffectedBounds;
+        if (b.Width < 4 || b.Height < 4) return;
+        using (Pen pen = new Pen(Colors.Rule, 1f))
+        using (GraphicsPath path = RoundMenu(b.X + 0.5f, b.Y + 0.5f, b.Width - 1f, b.Height - 1f, 12f)) {
+            g.DrawPath(pen, path);
+        }
+    }
+
+    protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e) {
+        if (e.Item is ToolStripSeparator) return;
+        Rectangle bounds = new Rectangle(6, 1, e.Item.Width - 12, e.Item.Height - 2);
+        if (bounds.Width < 4 || bounds.Height < 4) return;
+        Color fill = Colors.Canvas;
+        if (e.Item.Selected || e.Item.Pressed) fill = Colors.Hover;
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using (SolidBrush brush = new SolidBrush(fill))
+        using (GraphicsPath path = RoundMenu(bounds.X, bounds.Y, bounds.Width, bounds.Height, 8f)) {
+            e.Graphics.FillPath(brush, path);
+        }
+    }
+
+    protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e) {
+        e.TextColor = Colors.Ink;
+        base.OnRenderItemText(e);
+    }
+
+    protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e) {
+        int y = e.Item.Height / 2;
+        using (Pen pen = new Pen(Colors.Rule, 1f)) {
+            e.Graphics.DrawLine(pen, 14, y, e.Item.Width - 14, y);
+        }
+    }
+
+    protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e) {
+        Graphics g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        Rectangle b = e.ImageRectangle;
+        float x = b.Left + 2f;
+        float y = b.Top + (b.Height / 2f);
+        using (Pen pen = new Pen(Colors.Ink, 1.8f)) {
+            pen.StartCap = LineCap.Round;
+            pen.EndCap = LineCap.Round;
+            pen.LineJoin = LineJoin.Round;
+            g.DrawLine(pen, x, y, x + 3.2f, y + 3.2f);
+            g.DrawLine(pen, x + 3.2f, y + 3.2f, x + 8.2f, y - 3.4f);
+        }
+    }
+
+    protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e) {
+        e.ArrowColor = Colors.Ink;
+        base.OnRenderArrow(e);
+    }
 }
 '@
     try {
@@ -464,16 +645,23 @@ function Update-LauncherSurface {
         }
     }
     $layered = $false
+    $hadRegion = $null -ne $form.Region
+    if ($hadRegion) { $form.Region = $null }
     if (Initialize-DeskLayer) {
         try {
             $badge = Get-LauncherBadgeCount
-            $form.Region = $null
             $layered = [bool]([DeskLayer]::ShowLauncher($form.Handle, $color.ToArgb(), $form.Left, $form.Top, [bool]$script:PanelOpen, $badge, $icon))
         } catch {
             $layered = $false
         }
     }
     if ($layered) { return }
+    if ($hadRegion -and $null -eq $form.Region) {
+        $circle = New-Object System.Drawing.Drawing2D.GraphicsPath
+        $circle.AddEllipse(0, 0, 52, 52)
+        $form.Region = New-Object System.Drawing.Region($circle)
+        $circle.Dispose()
+    }
     if ($null -eq $form.Region) {
         $circle = New-Object System.Drawing.Drawing2D.GraphicsPath
         $circle.AddEllipse(0, 0, 52, 52)
@@ -566,15 +754,40 @@ function Apply-WidgetZOrder {
     }
 }
 
+function Test-LeftMousePress {
+    param($EventArgs)
+    if ($null -eq $EventArgs) { return $true }
+    $button = $null
+    try { $button = $EventArgs.Button } catch { return $true }
+    if ($null -eq $button) { return $true }
+    return [bool]($button -eq [System.Windows.Forms.MouseButtons]::Left)
+}
+
+function Attach-LauncherClickHook {
+    param($Form)
+    if ($null -eq $Form -or $Form.IsDisposed -or -not $Form.IsHandleCreated) { return }
+    if (-not (Initialize-DeskLayer)) { return }
+    if (-not ('DeskClickWindow' -as [type])) { return }
+    $hook = $script:LauncherClickHook
+    if ($null -ne $hook) {
+        try { $hook.ReleaseHandle() } catch { }
+    }
+    $hook = New-Object DeskClickWindow
+    $hook.AssignHandle($Form.Handle)
+    $script:LauncherClickHook = $hook
+}
+
 function Invoke-WindowChrome {
     param($Form, [switch]$Launcher)
     if ($null -eq $Form -or $Form.IsDisposed) { return }
     if (-not $Form.IsHandleCreated) { [void]$Form.Handle }
-    if (-not ('DesktopHost' -as [type])) { return }
-    try {
-        if ($Launcher) { [DesktopHost]::PrepareLauncher($Form.Handle) }
-        else { [DesktopHost]::PreparePanel($Form.Handle) }
-    } catch { }
+    if ('DesktopHost' -as [type]) {
+        try {
+            if ($Launcher) { [DesktopHost]::PrepareLauncher($Form.Handle) }
+            else { [DesktopHost]::PreparePanel($Form.Handle) }
+        } catch { }
+    }
+    if ($Launcher) { Attach-LauncherClickHook $Form }
 }
 
 function Enable-ControlBuffer {
@@ -678,17 +891,79 @@ function Update-SoftFieldTheme {
     $Field.Fill.Invalidate()
 }
 
+function Update-TrayIconImage {
+    if ($null -eq $script:TrayIcon) { return }
+    $fresh = $null
+    $owned = $false
+    if (Initialize-DeskLayer) {
+        try {
+            $accent = Get-LauncherFill
+            $color = [System.Drawing.Color]::FromArgb(255, [int]$accent.R, [int]$accent.G, [int]$accent.B)
+            $fresh = [DeskLayer]::MakeChatIcon($color.ToArgb())
+            $owned = $null -ne $fresh
+        } catch {
+            $fresh = $null
+            $owned = $false
+        }
+    }
+    if ($null -eq $fresh) {
+        $fresh = [System.Drawing.SystemIcons]::Application
+        $owned = $false
+    }
+    $previous = $script:TrayIcon.Icon
+    $previousOwned = [bool]$script:TrayIconOwned
+    $script:TrayIcon.Icon = $fresh
+    $script:TrayIconOwned = $owned
+    if ($previousOwned -and $null -ne $previous) {
+        try { [DeskLayer]::DestroyIcon($previous.Handle) } catch { }
+        try { $previous.Dispose() } catch { }
+    }
+}
+
 function Apply-TrayMenuPalette {
     if ($null -eq $script:TrayMenu) { return }
     $canvas = Get-ThemeColor Canvas
     $ink = Get-ThemeColor Ink
+    $hover = Get-ThemeColor Hover
+    $rule = Get-ThemeColor Rule
+    $accent = Get-ThemeColor Accent
     $script:TrayMenu.BackColor = $canvas
     $script:TrayMenu.ForeColor = $ink
+    $script:TrayMenu.ShowImageMargin = $false
+    $script:TrayMenu.ShowCheckMargin = $true
+    if (-not (Initialize-DeskLayer)) {
+        foreach ($item in @($script:TrayMenu.Items)) {
+            if ($item -is [System.Windows.Forms.ToolStripSeparator]) { continue }
+            $item.ForeColor = $ink
+        }
+        Update-TrayIconImage
+        return
+    }
+    if ('DeskMenuColors' -as [type]) {
+        $colors = $script:TrayMenuColors
+        if ($null -eq $colors) {
+            $colors = New-Object DeskMenuColors
+            $script:TrayMenuColors = $colors
+        }
+        $colors.Canvas = $canvas
+        $colors.Ink = $ink
+        $colors.Hover = $hover
+        $colors.Rule = $rule
+        $colors.Accent = $accent
+        $hasRenderer = $false
+        if ('DeskMenuRenderer' -as [type]) {
+            $hasRenderer = $script:TrayMenu.Renderer -is [DeskMenuRenderer]
+        }
+        if (-not $hasRenderer -and ('DeskMenuRenderer' -as [type])) {
+            $script:TrayMenu.Renderer = New-Object DeskMenuRenderer($colors)
+        }
+    }
     foreach ($item in @($script:TrayMenu.Items)) {
         if ($item -is [System.Windows.Forms.ToolStripSeparator]) { continue }
-        $item.BackColor = $canvas
         $item.ForeColor = $ink
     }
+    try { $script:TrayMenu.Invalidate() } catch { }
+    Update-TrayIconImage
 }
 
 function Apply-NewsPopupPalette {
@@ -1917,7 +2192,7 @@ function New-LauncherButton {
             $pen.Dispose()
         } else {
         $disc = $fill
-        if ($disc.A -lt 1) { $disc = [System.Drawing.Color]::FromArgb(1, $fill.R, $fill.G, $fill.B) }
+        if ($disc.A -lt 32) { $disc = [System.Drawing.Color]::FromArgb(32, $fill.R, $fill.G, $fill.B) }
         $brush = New-Object System.Drawing.SolidBrush $disc
         $g.FillEllipse($brush, 0, 0, 51, 51)
         $brush.Dispose()
@@ -1994,13 +2269,17 @@ function New-LauncherButton {
     })
     $form.Add_MouseEnter({ $script:LauncherHot = $true; Update-LauncherSurface })
     $form.Add_MouseLeave({ $script:LauncherHot = $false; Update-LauncherSurface })
-    $form.Add_Click({
+    $form.Add_MouseDown({
+        $mouse = $null
+        if ($args.Count -gt 1) { $mouse = $args[1] }
+        if (-not (Test-LeftMousePress $mouse)) { return }
         $now = Get-Date
-        if (($now - $script:LauncherClickAt).TotalMilliseconds -lt 280) { return }
+        if (($now - $script:LauncherClickAt).TotalMilliseconds -lt 400) { return }
         $script:LauncherClickAt = $now
         if ($script:PanelOpen) { Hide-SupportPanel }
         else { Show-SupportPanel -Page $script:WidgetPage }
     })
+    $form.Add_HandleCreated({ Attach-LauncherClickHook $form }.GetNewClosure())
     $form.Add_FormClosing({
         if ($script:AllowExit) { return }
         if ($_.CloseReason -eq [System.Windows.Forms.CloseReason]::UserClosing) { $_.Cancel = $true }
@@ -2095,12 +2374,18 @@ function New-SupportPanel {
     $close.SetBounds(($panelW - 60), 8, 48, 48)
     $close.Add_MouseEnter({ $this.ForeColor = Get-ThemeColor Ink; $this.BackColor = Get-ThemeColor Hover })
     $close.Add_MouseLeave({ $this.ForeColor = Get-ThemeColor Ink; $this.BackColor = Get-ThemeColor Canvas })
-    $close.Add_Click({ Hide-SupportPanel })
+    $close.Add_MouseDown({
+        $mouse = $null
+        if ($args.Count -gt 1) { $mouse = $args[1] }
+        if (-not (Test-LeftMousePress $mouse)) { return }
+        Hide-SupportPanel
+    })
     $header.Controls.Add($mark)
     $header.Controls.Add($title)
     $header.Controls.Add($identity)
     $header.Controls.Add($status)
     $header.Controls.Add($close)
+    $close.BringToFront()
 
     $sheet = New-Object System.Windows.Forms.Panel
     $sheet.SetBounds(0, $headerH, $panelW, ($panelH - $headerH))
@@ -2760,27 +3045,52 @@ function Ensure-DesktopWidget {
 function Ensure-TrayIcon {
     if ($script:TrayIcon) { return }
     $icon = New-Object System.Windows.Forms.NotifyIcon
-    $icon.Icon = [System.Drawing.SystemIcons]::Information
+    $icon.Icon = [System.Drawing.SystemIcons]::Application
     $icon.Text = 'Сервисная служба'
     $icon.Visible = $true
+    $script:TrayIconOwned = $false
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
-    $openItem = $menu.Items.Add('Открыть')
-    $ticketItem = $menu.Items.Add('Заявка')
-    $newsItem = $menu.Items.Add('Новости')
+    if ($script:TabFont) { $menu.Font = $script:TabFont }
+    else { $menu.Font = New-UiFont 'Segoe UI' 9 }
+    $menu.Padding = New-Object System.Windows.Forms.Padding(6, 8, 6, 8)
+    $menu.ShowImageMargin = $false
+    $menu.ShowCheckMargin = $true
+    $itemPad = New-Object System.Windows.Forms.Padding(6, 4, 12, 4)
+    $openItem = New-Object System.Windows.Forms.ToolStripMenuItem
+    $openItem.Text = 'Открыть'
+    $openItem.Padding = $itemPad
+    $ticketItem = New-Object System.Windows.Forms.ToolStripMenuItem
+    $ticketItem.Text = 'Заявка'
+    $ticketItem.Padding = $itemPad
+    $newsItem = New-Object System.Windows.Forms.ToolStripMenuItem
+    $newsItem.Text = 'Новости'
+    $newsItem.Padding = $itemPad
+    [void]$menu.Items.Add($openItem)
+    [void]$menu.Items.Add($ticketItem)
+    [void]$menu.Items.Add($newsItem)
     [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
     $buttonItem = New-Object System.Windows.Forms.ToolStripMenuItem
     $buttonItem.Text = 'Кнопка на экране'
     $buttonItem.CheckOnClick = $true
     $buttonItem.Checked = Test-ShowLauncher
+    $buttonItem.Padding = $itemPad
     $script:LauncherMenuItem = $buttonItem
     [void]$menu.Items.Add($buttonItem)
     $topItem = New-Object System.Windows.Forms.ToolStripMenuItem
     $topItem.Text = 'Поверх всех окон'
     $topItem.CheckOnClick = $true
     $topItem.Checked = Test-StayOnTop
+    $topItem.Padding = $itemPad
     $script:TopMenuItem = $topItem
     [void]$menu.Items.Add($topItem)
-    $exitItem = $menu.Items.Add('Выход')
+    if (Test-IsWindowsAdmin) {
+        [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+        $exitItem = New-Object System.Windows.Forms.ToolStripMenuItem
+        $exitItem.Text = 'Выход'
+        $exitItem.Padding = $itemPad
+        [void]$menu.Items.Add($exitItem)
+        $exitItem.Add_Click({ Stop-DesktopWidgetApp })
+    }
     $openItem.Add_Click({ Show-SupportPanel -Page $script:WidgetPage })
     $ticketItem.Add_Click({ Show-SupportPanel -Page Ticket })
     $newsItem.Add_Click({ Show-SupportPanel -Page News })
@@ -2800,12 +3110,23 @@ function Ensure-TrayIcon {
         }
         Apply-WidgetZOrder
     })
-    $exitItem.Add_Click({ Stop-DesktopWidgetApp })
+    $menu.Add_Opened({
+        try {
+            $strip = $menu
+            if ($null -ne $this -and $this -is [System.Windows.Forms.ContextMenuStrip]) { $strip = $this }
+            $width = [int]$strip.Width
+            $height = [int]$strip.Height
+            if ($width -lt 8 -or $height -lt 8) { return }
+            $path = New-RoundedPath -Width $width -Height $height -Radius 12
+            $strip.Region = New-Object System.Drawing.Region($path)
+            $path.Dispose()
+        } catch { }
+    }.GetNewClosure())
     $icon.ContextMenuStrip = $menu
     $script:TrayMenu = $menu
+    $script:TrayIcon = $icon
     Apply-TrayMenuPalette
     $icon.Add_DoubleClick({ Show-SupportPanel -Page Ticket })
-    $script:TrayIcon = $icon
 }
 
 function Stop-DesktopWidgetApp {
@@ -2815,9 +3136,17 @@ function Stop-DesktopWidgetApp {
     if ($script:PanelForm -and -not $script:PanelForm.IsDisposed) { $script:PanelForm.Close() }
     if ($script:WidgetForm -and -not $script:WidgetForm.IsDisposed) { $script:WidgetForm.Close() }
     if ($script:TrayIcon) {
+        $ownedIcon = $null
+        if ($script:TrayIconOwned) { $ownedIcon = $script:TrayIcon.Icon }
+        try { $script:TrayIcon.Icon = $null } catch { }
+        if ($null -ne $ownedIcon) {
+            try { [DeskLayer]::DestroyIcon($ownedIcon.Handle) } catch { }
+            try { $ownedIcon.Dispose() } catch { }
+        }
         $script:TrayIcon.Visible = $false
         $script:TrayIcon.Dispose()
         $script:TrayIcon = $null
+        $script:TrayIconOwned = $false
     }
     if ($script:WidgetContext) { $script:WidgetContext.ExitThread() }
 }
@@ -2930,13 +3259,19 @@ function Ensure-NewsPopup {
     $close.Cursor = [System.Windows.Forms.Cursors]::Hand
     $close.Add_MouseEnter({ $this.ForeColor = Get-ThemeColor Ink; $this.BackColor = Get-ThemeColor Hover })
     $close.Add_MouseLeave({ $this.ForeColor = Get-ThemeColor Ink; $this.BackColor = Get-ThemeColor Canvas })
-    $close.Add_Click({ Hide-NewsPopup })
+    $close.Add_MouseDown({
+        $mouse = $null
+        if ($args.Count -gt 1) { $mouse = $args[1] }
+        if (-not (Test-LeftMousePress $mouse)) { return }
+        Hide-NewsPopup
+    })
     $headerRule = New-Object System.Windows.Forms.Panel
     $headerRule.SetBounds(12, 43, 256, 1)
     $headerRule.BackColor = $ruleColor
     $header.Controls.Add($title)
     $header.Controls.Add($close)
     $header.Controls.Add($headerRule)
+    $close.BringToFront()
     $body = New-Object System.Windows.Forms.Panel
     $body.SetBounds(0, 44, 280, 84)
     $body.BackColor = $canvas

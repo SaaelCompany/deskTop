@@ -549,6 +549,9 @@ Assert-Equal 'create url' (Get-JiraCreateRequestUrl 'https://jira.example') 'htt
 Assert-Equal 'portal default' (Get-JiraPortalUrl -BaseUrl 'https://jira.example' -ExplicitUrl '') 'https://jira.example/servicedesk/customer/portals'
 Assert-Equal 'portal explicit' (Get-JiraPortalUrl -BaseUrl 'https://jira.example' -ExplicitUrl 'https://sd.example/portal') 'https://sd.example/portal'
 
+$admin = Test-IsWindowsAdmin
+Assert-Equal 'admin flag is bool' ($admin -is [bool]) $true
+
 foreach ($name in @('DesktopSwitch.Logic.ps1', 'DesktopSwitch.ps1', 'DesktopSwitch.Widget.ps1', 'Install-DesktopSwitch.ps1', 'Uninstall-DesktopSwitch.ps1')) {
     $path = Join-Path $root $name
     $tokens = $null
