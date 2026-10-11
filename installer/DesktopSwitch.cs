@@ -12,8 +12,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("DesktopSwitch")]
 [assembly: AssemblyProduct("DesktopSwitch")]
 [assembly: AssemblyCompany("SaaelCompany")]
-[assembly: AssemblyVersion("1.2.29.0")]
-[assembly: AssemblyFileVersion("1.2.29.0")]
+[assembly: AssemblyVersion("1.2.30.0")]
+[assembly: AssemblyFileVersion("1.2.30.0")]
 
 internal static class DesktopSwitchHost {
     const string Title = "\u0421\u0435\u0440\u0432\u0438\u0441\u043d\u0430\u044f \u0441\u043b\u0443\u0436\u0431\u0430";
@@ -162,7 +162,7 @@ internal static class DesktopSwitchHost {
 
     static string Usage(string script) {
         var text = new StringBuilder();
-        text.AppendLine("DesktopSwitch 1.2.29");
+        text.AppendLine("DesktopSwitch 1.2.30");
         text.AppendLine(script);
         text.AppendLine("DesktopSwitch.exe");
         text.AppendLine("DesktopSwitch.exe -Status");
@@ -179,20 +179,29 @@ internal static class DesktopSwitchHost {
     }
 
     static string PrepareScript(string exeDir) {
-        if (ScriptsReady(exeDir)) return Path.Combine(exeDir, "DesktopSwitch.ps1");
+        if (ScriptsReady(exeDir)) {
+            if (CanWrite(exeDir)) {
+                try { RefreshScripts(exeDir); } catch (Exception ex) { Note("script refresh skipped: " + ex.Message); }
+            }
+            return Path.Combine(exeDir, "DesktopSwitch.ps1");
+        }
         string dest = CanWrite(exeDir)
             ? exeDir
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DesktopSwitch", "app");
         Directory.CreateDirectory(dest);
-        ExtractResource("DesktopSwitch.ps1", dest);
-        ExtractResource("DesktopSwitch.Logic.ps1", dest);
-        ExtractResource("DesktopSwitch.Widget.ps1", dest);
+        RefreshScripts(dest);
         string config = Path.Combine(dest, "config.json");
         if (!File.Exists(config)) {
             File.WriteAllText(config, "{\r\n  \"Enabled\": true,\r\n  \"Preview\": true,\r\n  \"NetworkDesktopPath\": \"\"\r\n}\r\n", new UTF8Encoding(true));
         }
         Note("extracted scripts to " + dest);
         return Path.Combine(dest, "DesktopSwitch.ps1");
+    }
+
+    static void RefreshScripts(string directory) {
+        ExtractResource("DesktopSwitch.ps1", directory);
+        ExtractResource("DesktopSwitch.Logic.ps1", directory);
+        ExtractResource("DesktopSwitch.Widget.ps1", directory);
     }
 
     static void ExtractResource(string name, string directory) {

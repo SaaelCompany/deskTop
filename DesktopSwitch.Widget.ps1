@@ -334,21 +334,23 @@ public static class DeskLayer {
                 }
             } else {
             Color disc = fill;
-            if (disc.A < 32) disc = Color.FromArgb(32, fill.R, fill.G, fill.B);
-            using (SolidBrush brush = new SolidBrush(disc)) {
+            int plateAlpha = disc.A == 0 ? 1 : disc.A;
+            using (SolidBrush brush = new SolidBrush(Color.FromArgb(plateAlpha, disc.R, disc.G, disc.B))) {
                 g.FillEllipse(brush, 0.5f, 0.5f, 51f, 51f);
             }
             bool drewIcon = false;
+            int inset = disc.A == 0 ? 1 : 6;
+            int iconSize = size - (inset * 2);
             if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath)) {
                 try {
                     using (FileStream stream = new FileStream(iconPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                     using (Image image = Image.FromStream(stream)) {
                         g.SetClip(new Rectangle(0, 0, size, size));
                         using (GraphicsPath clip = new GraphicsPath()) {
-                            clip.AddEllipse(1, 1, 50, 50);
+                            clip.AddEllipse(inset, inset, iconSize, iconSize);
                             g.SetClip(clip);
                         }
-                        g.DrawImage(image, new Rectangle(6, 6, 40, 40));
+                        g.DrawImage(image, new Rectangle(inset, inset, iconSize, iconSize));
                         g.ResetClip();
                         drewIcon = true;
                     }
@@ -2192,11 +2194,15 @@ function New-LauncherButton {
             $pen.Dispose()
         } else {
         $disc = $fill
-        if ($disc.A -lt 32) { $disc = [System.Drawing.Color]::FromArgb(32, $fill.R, $fill.G, $fill.B) }
-        $brush = New-Object System.Drawing.SolidBrush $disc
+        $plateAlpha = $disc.A
+        if ($plateAlpha -eq 0) { $plateAlpha = 1 }
+        $brush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb($plateAlpha, $disc.R, $disc.G, $disc.B))
         $g.FillEllipse($brush, 0, 0, 51, 51)
         $brush.Dispose()
         $drewIcon = $false
+        $inset = 6
+        if ($disc.A -eq 0) { $inset = 1 }
+        $iconSize = 52 - ($inset * 2)
         if ($script:Cfg -and -not [string]::IsNullOrWhiteSpace([string]$script:Cfg.WidgetIcon)) {
             $iconPath = Resolve-WidgetIconPath ([string]$script:Cfg.WidgetIcon)
             if (-not [string]::IsNullOrWhiteSpace($iconPath)) {
@@ -2206,9 +2212,9 @@ function New-LauncherButton {
                     $stream = New-Object System.IO.FileStream($iconPath, 'Open', 'Read', 'ReadWrite')
                     $image = [System.Drawing.Image]::FromStream($stream)
                     $clip = New-Object System.Drawing.Drawing2D.GraphicsPath
-                    $clip.AddEllipse(6, 6, 40, 40)
+                    $clip.AddEllipse($inset, $inset, $iconSize, $iconSize)
                     $g.SetClip($clip)
-                    $g.DrawImage($image, (New-Object System.Drawing.Rectangle(8, 8, 36, 36)))
+                    $g.DrawImage($image, (New-Object System.Drawing.Rectangle($inset, $inset, $iconSize, $iconSize)))
                     $g.ResetClip()
                     $clip.Dispose()
                     $drewIcon = $true
