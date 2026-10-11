@@ -9,8 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = Path(__file__).resolve().parent
-VERSION = "1.2.27"
-PRODUCT_CODE = "{56B1F1E4-9016-4774-9834-002377EC184B}"
+VERSION = "1.2.28"
+PRODUCT_CODE = "{E7B41C2A-8F03-4D56-A9C1-5B6E0D3F8A24}"
 UPGRADE_CODE = "{4048E9C4-7965-48DC-A23D-A4554966E57F}"
 
 
@@ -153,20 +153,6 @@ def main():
     write_icon(INSTALLER / "DesktopSwitch.ico")
     shutil.copy(INSTALLER / "DesktopSwitch.ico", stage / "DesktopSwitch.ico")
 
-    exe = stage / "DesktopSwitch.exe"
-    run([
-        mcs, "-nologo", "-target:winexe", "-sdk:4.5", "-platform:anycpu", "-optimize+",
-        "-codepage:utf8",
-        "-r:" + str(drawing),
-        "-r:" + str(winforms),
-        "-r:" + str(sma),
-        "-win32icon:" + str(stage / "DesktopSwitch.ico"),
-        "-out:" + str(exe),
-        str(INSTALLER / "DesktopSwitch.cs"),
-    ])
-    if subsystem(exe) != 2:
-        raise SystemExit("DesktopSwitch.exe is not a Windows GUI binary")
-
     names = [
         "DesktopSwitch.ps1",
         "DesktopSwitch.Logic.ps1",
@@ -184,6 +170,23 @@ def main():
     config_text = (stage / "config.json").read_text(encoding="utf-8-sig")
     if '"Enabled": true' not in config_text:
         raise SystemExit("SCCM config is not enabled")
+
+    exe = stage / "DesktopSwitch.exe"
+    run([
+        mcs, "-nologo", "-target:winexe", "-sdk:4.5", "-platform:anycpu", "-optimize+",
+        "-codepage:utf8",
+        "-r:" + str(drawing),
+        "-r:" + str(winforms),
+        "-r:" + str(sma),
+        "-win32icon:" + str(stage / "DesktopSwitch.ico"),
+        "-resource:" + str(stage / "DesktopSwitch.ps1") + ",DesktopSwitch.ps1",
+        "-resource:" + str(stage / "DesktopSwitch.Logic.ps1") + ",DesktopSwitch.Logic.ps1",
+        "-resource:" + str(stage / "DesktopSwitch.Widget.ps1") + ",DesktopSwitch.Widget.ps1",
+        "-out:" + str(exe),
+        str(INSTALLER / "DesktopSwitch.cs"),
+    ])
+    if subsystem(exe) != 2:
+        raise SystemExit("DesktopSwitch.exe is not a Windows GUI binary")
 
     wxs = stage / "DesktopSwitch.wxs"
     shutil.copy(INSTALLER / "DesktopSwitch.wxs", wxs)

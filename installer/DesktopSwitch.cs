@@ -12,8 +12,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("DesktopSwitch")]
 [assembly: AssemblyProduct("DesktopSwitch")]
 [assembly: AssemblyCompany("SaaelCompany")]
-[assembly: AssemblyVersion("1.2.27.0")]
-[assembly: AssemblyFileVersion("1.2.27.0")]
+[assembly: AssemblyVersion("1.2.28.0")]
+[assembly: AssemblyFileVersion("1.2.28.0")]
 
 internal static class DesktopSwitchHost {
     const string Title = "\u0421\u0435\u0440\u0432\u0438\u0441\u043d\u0430\u044f \u0441\u043b\u0443\u0436\u0431\u0430";
@@ -61,20 +61,21 @@ internal static class DesktopSwitchHost {
                 StopOtherCopies();
                 return 0;
             }
-            if (help) status = true;
             string exe = Application.ExecutablePath;
             string dir = Path.GetDirectoryName(exe);
-            string script = Path.Combine(dir, "DesktopSwitch.ps1");
-            if (help || !File.Exists(script)) {
-                string usage = Usage(script);
-                if (!File.Exists(script)) {
-                    Fail(usage);
-                    return 1;
-                }
-                ShowConsole(usage);
+            string script;
+            try {
+                script = PrepareScript(dir);
+            } catch (Exception ex) {
+                Note(ex.ToString());
+                Fail("\u0420\u044f\u0434\u043e\u043c \u0441 DesktopSwitch.exe \u043d\u0435\u0442 \u0444\u0430\u0439\u043b\u043e\u0432 \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u044b. \u0420\u0430\u0441\u043f\u0430\u043a\u0443\u0439\u0442\u0435 \u0430\u0440\u0445\u0438\u0432 \u0446\u0435\u043b\u0438\u043a\u043e\u043c \u0438\u043b\u0438 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0435 DesktopSwitch.msi.");
+                return 1;
+            }
+            if (help) {
+                ShowConsole(Usage(script));
                 return 0;
             }
-            Directory.SetCurrentDirectory(dir);
+            Directory.SetCurrentDirectory(Path.GetDirectoryName(script));
             bool ownConsole = false;
             if (status) ownConsole = OpenConsole();
             Note("start " + string.Join(" ", args));
@@ -161,7 +162,7 @@ internal static class DesktopSwitchHost {
 
     static string Usage(string script) {
         var text = new StringBuilder();
-        text.AppendLine("DesktopSwitch 1.2.27");
+        text.AppendLine("DesktopSwitch 1.2.28");
         text.AppendLine(script);
         text.AppendLine("DesktopSwitch.exe");
         text.AppendLine("DesktopSwitch.exe -Status");
@@ -171,7 +172,60 @@ internal static class DesktopSwitchHost {
         return text.ToString();
     }
 
+    static bool ScriptsReady(string directory) {
+        return File.Exists(Path.Combine(directory, "DesktopSwitch.ps1"))
+            && File.Exists(Path.Combine(directory, "DesktopSwitch.Logic.ps1"))
+            && File.Exists(Path.Combine(directory, "DesktopSwitch.Widget.ps1"));
+    }
+
+    static string PrepareScript(string exeDir) {
+        if (ScriptsReady(exeDir)) return Path.Combine(exeDir, "DesktopSwitch.ps1");
+        string dest = CanWrite(exeDir)
+            ? exeDir
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DesktopSwitch", "app");
+        Directory.CreateDirectory(dest);
+        ExtractResource("DesktopSwitch.ps1", dest);
+        ExtractResource("DesktopSwitch.Logic.ps1", dest);
+        ExtractResource("DesktopSwitch.Widget.ps1", dest);
+        string config = Path.Combine(dest, "config.json");
+        if (!File.Exists(config)) {
+            File.WriteAllText(config, "{\r\n  \"Enabled\": true,\r\n  \"Preview\": true,\r\n  \"NetworkDesktopPath\": \"\"\r\n}\r\n", new UTF8Encoding(true));
+        }
+        Note("extracted scripts to " + dest);
+        return Path.Combine(dest, "DesktopSwitch.ps1");
+    }
+
+    static void ExtractResource(string name, string directory) {
+        using (Stream source = Assembly.GetExecutingAssembly().GetManifestResourceStream(name)) {
+            if (source == null) throw new FileNotFoundException(name);
+            using (FileStream dest = File.Create(Path.Combine(directory, name))) {
+                source.CopyTo(dest);
+            }
+        }
+    }
+
+    static bool CanWrite(string directory) {
+        try {
+            string probe = Path.Combine(directory, ".desktopswitch-write");
+            File.WriteAllText(probe, "ok");
+            File.Delete(probe);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    static string Explain(string text) {
+        if (string.IsNullOrEmpty(text)) return text;
+        if (text.IndexOf("\u0434\u043e\u043f\u0443\u0441\u0442\u0438\u043c\u044b\u0439 \u043f\u0443\u0442\u044c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f", StringComparison.OrdinalIgnoreCase) >= 0
+            || text.IndexOf("valid user path", StringComparison.OrdinalIgnoreCase) >= 0) {
+            return "\u042d\u0442\u043e \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435 Windows, \u0430 \u043d\u0435 \u043e\u0448\u0438\u0431\u043a\u0430 config.json. \u0423 \u0443\u0447\u0451\u0442\u043d\u043e\u0439 \u0437\u0430\u043f\u0438\u0441\u0438 \u043d\u0435 \u0437\u0430\u0434\u0430\u043d\u0430 \u0434\u043e\u043c\u0430\u0448\u043d\u044f\u044f \u043f\u0430\u043f\u043a\u0430. \u0423\u043a\u0430\u0436\u0438\u0442\u0435 \u0435\u0451 \u0432 \u0441\u0432\u043e\u0439\u0441\u0442\u0432\u0430\u0445 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f, \u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440 C:\\Users\\\u0438\u043c\u044f.\r\n\r\n" + text;
+        }
+        return text;
+    }
+
     static void Fail(string text) {
+        text = Explain(text);
         Note(text);
         try {
             MessageBox.Show(text, Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);

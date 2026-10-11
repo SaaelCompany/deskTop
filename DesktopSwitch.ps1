@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.27'
+$script:Version = '1.2.28'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
