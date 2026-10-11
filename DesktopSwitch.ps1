@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.16'
+$script:Version = '1.2.17'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -739,7 +739,11 @@ function Invoke-MonitorCycle {
             if (($decision.Action -eq 'SwitchToLocal' -or $decision.Action -eq 'ReassertLocal') -and (Test-Path -LiteralPath $script:Cfg.LocalDesktopPath)) {
                 $shortcutCount = @(Get-ChildItem -LiteralPath $script:Cfg.LocalDesktopPath -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '^\.(lnk|url)$' }).Count
                 if ($shortcutCount -eq 0) {
-                    Write-Log 'В локальной папке пока нет ярлыков. Они копируются, пока общая папка доступна. Если сбой случился до первого копирования, локальный стол будет пустым.' 'WARN'
+                    if ($script:Cfg.SyncShortcutsWhileOnline) {
+                        Write-Log 'В локальной папке пока нет ярлыков. Они копируются, пока общая папка доступна. Если сбой случился до первого копирования, локальный стол будет пустым.' 'WARN'
+                    } else {
+                        Write-Log ("В папке {0} нет ярлыков .lnk и .url. Положите их туда заранее: при выключенном копировании программа эту папку сама не заполняет." -f $script:Cfg.LocalDesktopPath) 'WARN'
+                    }
                 }
             }
         }
@@ -805,6 +809,11 @@ try {
     } else {
         $session = Get-WindowsSessionIdentity
         Write-Log ("DesktopSwitch {0} запущен. Пользователь={1} компьютер={2} условие={3} интервал={4}с." -f $script:Version, $session.Login, $session.Computer, $script:Cfg.Trigger, $script:Cfg.CheckIntervalSeconds)
+        if ($script:Cfg.SyncShortcutsWhileOnline) {
+            Write-Log ("Ярлыки копируются в {0}, пока общая папка доступна." -f $script:Cfg.LocalDesktopPath)
+        } else {
+            Write-Log ("Копирование ярлыков выключено. При обрыве стол переключится на готовую папку {0}." -f $script:Cfg.LocalDesktopPath)
+        }
         if ($script:Cfg.WidgetEnabled) {
             Start-WidgetApplication
         } else {
