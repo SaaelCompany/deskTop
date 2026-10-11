@@ -234,7 +234,23 @@ try { Get-EffectiveDesktopConfig ([pscustomobject]@{ Trigger = 'wifi' }) | Out-N
 Assert-True 'bad trigger throws' $badTrigger
 
 $root = Split-Path $PSScriptRoot -Parent
-$example = Get-Content -LiteralPath (Join-Path $root 'config.example.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$example = ConvertFrom-DesktopJson (Get-Content -LiteralPath (Join-Path $root 'config.example.json') -Raw -Encoding UTF8)
+$commented = ConvertFrom-DesktopJson @'
+{
+  "Enabled": false, // монитор выключен
+  "InternetCheck": { "ProbeUrls": ["http://www.msftconnecttest.com/connecttest.txt"] }
+}
+'@
+Assert-Equal 'commented config stays off' $commented.Enabled $false
+Assert-Equal 'comment keeps probe url' @($commented.InternetCheck.ProbeUrls)[0] 'http://www.msftconnecttest.com/connecttest.txt'
+$slashText = Remove-JsonComments '{"body":"http://intranet // внутри строки"} // снаружи'
+$slashParsed = $slashText | ConvertFrom-Json
+Assert-Equal 'slash inside string' $slashParsed.body 'http://intranet // внутри строки'
+$newsPath = Join-Path $root 'examples/news.json'
+$newsFeed = @(ConvertFrom-NewsFeed (Get-Content -LiteralPath $newsPath -Raw -Encoding UTF8))
+$phone = @($newsFeed | Where-Object { [string]$_.Id -eq 'phone-2026-10-11' })
+Assert-Equal 'phone notice count' $phone.Count 1
+Assert-Equal 'phone notice kind' $phone[0].Kind 'maintenance'
 $exampleConfig = Get-EffectiveDesktopConfig $example
 Assert-Equal 'example stays disabled' $exampleConfig.Enabled $false
 Assert-Equal 'example follows policy' $exampleConfig.NetworkDesktopPath ''

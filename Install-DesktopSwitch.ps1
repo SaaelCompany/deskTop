@@ -26,7 +26,7 @@ if (-not (Test-Path -LiteralPath $configPath)) {
     throw "Нет файла config.json. Скопируйте '$example' в '$configPath' и поставьте Enabled в true. Права администратора не нужны, сетевой путь политика задаёт сама."
 }
 
-$loaded = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$loaded = ConvertFrom-DesktopJson (Get-Content -LiteralPath $configPath -Raw -Encoding UTF8)
 $effective = Get-EffectiveDesktopConfig $loaded
 $problems = New-Object System.Collections.Generic.List[string]
 if (-not $effective.Enabled) {

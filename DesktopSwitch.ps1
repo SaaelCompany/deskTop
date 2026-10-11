@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.17'
+$script:Version = '1.2.18'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -153,7 +153,7 @@ function Read-DesktopConfig {
     param([string]$Path)
     $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
     if ([string]::IsNullOrWhiteSpace($raw)) { throw "Файл конфигурации пуст: $Path" }
-    return ($raw | ConvertFrom-Json)
+    return (ConvertFrom-DesktopJson $raw)
 }
 
 function Initialize-Log {

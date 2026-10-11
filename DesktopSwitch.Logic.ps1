@@ -13,6 +13,52 @@ function Get-Prop {
     ,$prop.Value
 }
 
+function Remove-JsonComments {
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return '' }
+    $builder = New-Object System.Text.StringBuilder
+    $inString = $false
+    $escape = $false
+    $chars = $Text.ToCharArray()
+    $i = 0
+    while ($i -lt $chars.Length) {
+        $c = $chars[$i]
+        if ($inString) {
+            [void]$builder.Append($c)
+            if ($escape) {
+                $escape = $false
+            } elseif ($c -eq '\') {
+                $escape = $true
+            } elseif ($c -eq '"') {
+                $inString = $false
+            }
+            $i++
+            continue
+        }
+        if ($c -eq '"') {
+            $inString = $true
+            [void]$builder.Append($c)
+            $i++
+            continue
+        }
+        if ($c -eq '/' -and ($i + 1) -lt $chars.Length -and $chars[$i + 1] -eq '/') {
+            $i += 2
+            while ($i -lt $chars.Length -and $chars[$i] -ne "`n" -and $chars[$i] -ne "`r") { $i++ }
+            continue
+        }
+        [void]$builder.Append($c)
+        $i++
+    }
+    return $builder.ToString()
+}
+
+function ConvertFrom-DesktopJson {
+    param([string]$Text)
+    $clean = Remove-JsonComments $Text
+    if ([string]::IsNullOrWhiteSpace($clean)) { throw 'Файл JSON пуст.' }
+    return ($clean | ConvertFrom-Json)
+}
+
 function ConvertTo-Bool {
     param($Value, [bool]$Default)
     if ($null -eq $Value) { return $Default }
@@ -905,7 +951,7 @@ function ConvertFrom-NewsFeed {
         $xml.LoadXml($trim)
         return ConvertFrom-NewsXml $xml
     }
-    $parsed = $trim | ConvertFrom-Json
+    $parsed = ConvertFrom-DesktopJson $trim
     return ConvertFrom-NewsJson $parsed
 }
 
