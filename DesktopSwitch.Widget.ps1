@@ -315,9 +315,7 @@ public static class DeskLayer {
             g.Clear(Color.Transparent);
             Color fill = Color.FromArgb(fillArgb);
             if (open) {
-                Color plate = Color.FromArgb(255, fill.R, fill.G, fill.B);
-                if (plate.R + plate.G + plate.B < 48) plate = Color.FromArgb(255, 47, 107, 255);
-                using (SolidBrush plateBrush = new SolidBrush(plate)) {
+                using (SolidBrush plateBrush = new SolidBrush(Color.FromArgb(168, 16, 18, 24))) {
                     g.FillEllipse(plateBrush, 0.5f, 0.5f, 51f, 51f);
                 }
                 using (Pen pen = new Pen(Color.White, 2.6f)) {
@@ -1514,10 +1512,41 @@ function Clear-ChildControls {
     }
 }
 
+function Move-NewsScroll {
+    param([int]$Delta)
+    $canvas = $script:NewsCanvas
+    $list = $null
+    if ($script:WidgetUi) { $list = $script:WidgetUi.NewsList }
+    if ($null -eq $canvas -or $canvas.IsDisposed -or $null -eq $list -or $list.IsDisposed) { return }
+    $max = $canvas.Height - $list.ClientSize.Height
+    if ($max -lt 0) { $max = 0 }
+    $step = 0
+    if ($Delta -gt 0) { $step = 72 } elseif ($Delta -lt 0) { $step = -72 }
+    $next = $canvas.Top + $step
+    if ($next -gt 0) { $next = 0 }
+    if ($next -lt (0 - $max)) { $next = 0 - $max }
+    $canvas.Top = $next
+}
+
+function Register-NewsWheel {
+    param($Control)
+    if ($null -eq $Control -or $Control.IsDisposed) { return }
+    $Control.Add_MouseWheel({ if ($args.Count -gt 1) { Move-NewsScroll $args[1].Delta } })
+    foreach ($child in @($Control.Controls)) { Register-NewsWheel $child }
+}
+
 function Update-NewsRows {
     if ($null -eq $script:WidgetUi) { return }
     $list = $script:WidgetUi.NewsList
     Clear-ChildControls $list
+    $list.AutoScroll = $false
+    $canvas = New-Object System.Windows.Forms.Panel
+    $canvas.BackColor = Get-ThemeColor Canvas
+    $viewWidth = $list.ClientSize.Width
+    if ($viewWidth -lt 120) { $viewWidth = [int]$script:SupportPanelWidth }
+    $canvas.SetBounds(0, 0, $viewWidth, 40)
+    $list.Controls.Add($canvas)
+    $script:NewsCanvas = $canvas
     $visible = New-Object System.Collections.Generic.List[object]
     foreach ($candidate in @($script:NewsItems)) {
         if ($null -eq $candidate) { continue }
@@ -1540,12 +1569,15 @@ function Update-NewsRows {
         $hint.ForeColor = Get-ThemeColor Muted
         $hint.BackColor = Get-ThemeColor Canvas
         $hint.SetBounds(16, 76, $emptyWidth, 36)
-        $list.Controls.Add($empty)
-        $list.Controls.Add($hint)
+        $canvas.Controls.Add($empty)
+        $canvas.Controls.Add($hint)
+        $canvas.Height = 140
+        Register-NewsWheel $canvas
         return
     }
     $y = 12
-    $rowWidth = [int]$script:SupportPanelWidth - 32
+    $rowWidth = $viewWidth - 32
+    if ($rowWidth -lt 120) { $rowWidth = [int]$script:SupportPanelWidth - 32 }
     $rowHeight = 84
     foreach ($item in $items) {
         $url = [string]$item.Url
@@ -1602,11 +1634,13 @@ function Update-NewsRows {
         $row.Controls.Add($title)
         $row.Controls.Add($body)
         $row.Controls.Add($when)
-        $list.Controls.Add($row)
+        $canvas.Controls.Add($row)
         $y += ($rowHeight + 10)
         if ($y -gt 2400) { break }
     }
-    $list.AutoScrollMinSize = New-Object System.Drawing.Size(0, $y)
+    $canvas.Height = $y + 16
+    $canvas.Top = 0
+    Register-NewsWheel $canvas
 }
 
 function Test-JiraTicketMode {
@@ -1872,11 +1906,7 @@ function New-LauncherButton {
         $fill = Get-LauncherFill
         if ($script:LauncherHot) { $fill = Get-LauncherFill -Hover }
         if ($script:PanelOpen) {
-            $plateColor = [System.Drawing.Color]::FromArgb(255, $fill.R, $fill.G, $fill.B)
-            if (($plateColor.R + $plateColor.G + $plateColor.B) -lt 48) {
-                $plateColor = [System.Drawing.Color]::FromArgb(255, 47, 107, 255)
-            }
-            $plate = New-Object System.Drawing.SolidBrush $plateColor
+            $plate = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(168, 16, 18, 24))
             $g.FillEllipse($plate, 0, 0, 51, 51)
             $plate.Dispose()
             $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White, 2.6)
@@ -2118,8 +2148,9 @@ function New-SupportPanel {
     $newsPage.BackColor = $headerColor
     $newsList = New-Object System.Windows.Forms.Panel
     $newsList.Dock = 'Fill'
-    $newsList.AutoScroll = $true
+    $newsList.AutoScroll = $false
     $newsList.BackColor = $headerColor
+    $newsList.Add_MouseWheel({ if ($args.Count -gt 1) { Move-NewsScroll $args[1].Delta } })
     $newsPage.Controls.Add($newsList)
 
     $ticketPage = New-Object System.Windows.Forms.Panel
