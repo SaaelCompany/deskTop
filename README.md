@@ -101,27 +101,51 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-DesktopSwitch.
 
 ## Пакет SCCM
 
-Все настройки кладутся в пакет заранее. В источнике приложения рядом со скриптами должен лежать готовый `config.json`: `Enabled` равен `true`, адрес helpdesk, проекты, категории и лента новостей уже заполнены. `NetworkDesktopPath` оставьте пустым: путь общего стола у каждого пользователя свой и читается из политики. Отдельная настройка на компьютере после установки не нужна.
+Корпоративная установка — это `dist/DesktopSwitch.msi`. Рядом лежит `dist/DesktopSwitch.exe`: тот же файл, который MSI кладёт в `C:\Program Files\DesktopSwitch`. Исполняемый файл не показывает консоль. Он открывает скрипты через движок Windows PowerShell 5.1 внутри процесса `DesktopSwitch.exe` и не запускает отдельный `powershell.exe`. Windows PowerShell входит в Windows 10 и Windows 11, отдельно его ставить не нужно.
 
-Программа установки SCCM выполняется от SYSTEM:
+MSI ставится на компьютер, не на одного пользователя. Установка от SYSTEM не запускает монитор в сеансе 0. В общую автозагрузку кладётся ярлык: кнопка и переключение стола появляются при входе сотрудника. Перед копированием файлов установщик завершает уже запущенный `DesktopSwitch.exe` и снимает старый `DesktopSwitch.vbs` из общей автозагрузки. Ярлык в автозагрузке одного пользователя, если он был создан без `-AllUsers`, эта установка не ищет: его снимает `Uninstall-DesktopSwitch.ps1` в сеансе этого пользователя.
+
+В пакет уже входит `config.json` с `Enabled` равным `true` и пустым `NetworkDesktopPath`: путь общего стола читается из политики. Адрес Jira в этом файле пустой. Перед массовой раздачей впишите свой `JiraBaseUrl` и при необходимости `NewsJql`, затем соберите MSI заново скриптом `installer/build-release.py`. Токен оставьте пустым, если на проде вход идёт учётной записью Windows. Повторная установка той же или более новой версии заменяет `config.json` файлом из пакета.
+
+Тихая установка:
+
+```text
+msiexec /i DesktopSwitch.msi /qn /l*v C:\Windows\Temp\DesktopSwitch-install.log
+```
+
+Код продукта этой сборки: `{56B1F1E4-9016-4774-9834-002377EC184B}`. Код обновления, он не меняется между версиями: `{4048E9C4-7965-48DC-A23D-A4554966E57F}`.
+
+Обнаружение для SCCM: установлен этот код продукта, либо существует `C:\Program Files\DesktopSwitch\DesktopSwitch.exe`, либо в `HKLM\Software\SaaelCompany\DesktopSwitch` значение `Version` равно `1.2.27`.
+
+Удаление:
+
+```text
+msiexec /x {56B1F1E4-9016-4774-9834-002377EC184B} /qn
+```
+
+Чтобы заменить файлы той же версии, в том числе `config.json`:
+
+```text
+msiexec /i DesktopSwitch.msi /qn REINSTALL=ALL REINSTALLMODE=amus
+```
+
+Следующая версия программы должна получить новый код продукта и больший номер версии. Код обновления остаётся прежним: тогда Windows Installer сам снимет старую копию.
+
+Журналы в `%LOCALAPPDATA%\DesktopSwitch` и локальные копии ярлыков при удалении остаются. Пользователям достаточно чтения `C:\Program Files\DesktopSwitch`: общий ключ helpdesk в `config.json` они менять не должны. После установки уже вошедшему сотруднику нужен повторный вход, чтобы сработала автозагрузка. До этого ярлык можно запустить вручную: `C:\Program Files\DesktopSwitch\DesktopSwitch.exe`.
+
+Состояние без установки смотрит `Show-DesktopSwitchStatus.cmd` или `DesktopSwitch.exe -Status`.
+
+Скриптовая установка по-прежнему годится, если MSI не используется. Рядом со скриптами должен лежать готовый `config.json`. Учётная запись SYSTEM копирует пакет и включает общий автозапуск:
 
 ```text
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-DesktopSwitch.ps1 -InstallDir "%ProgramFiles%\DesktopSwitch" -AllUsers
 ```
 
-`-InstallDir` копирует пакет в постоянную папку. Ярлык автозагрузки указывает на неё, а не на кэш SCCM. Учётная запись SYSTEM включает автозапуск для всех пользователей и не запускает монитор в своём сеансе: окно и переключение стола появляются при входе сотрудника. Повторная установка заменяет и файлы, и `config.json`.
-
-Обнаружение: существует `%ProgramFiles%\DesktopSwitch\DesktopSwitch.ps1`.
-
-Удаление:
+Если рядом есть `DesktopSwitch.exe`, автозапуск и задача планировщика вызывают его. Удаление скриптом:
 
 ```text
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ProgramFiles%\DesktopSwitch\Uninstall-DesktopSwitch.ps1" -AllUsers -InstallDir "%ProgramFiles%\DesktopSwitch"
 ```
-
-Папка программы удаляется. Журналы в `%LOCALAPPDATA%\DesktopSwitch` и локальные копии ярлыков остаются. Пользователям достаточно чтения папки установки: общий ключ helpdesk в `config.json` они менять не должны.
-
-Журнал каждого пользователя: `%LOCALAPPDATA%\DesktopSwitch\desktop-switch.log`. Двойной щелчок по `Show-DesktopSwitchStatus.cmd` показывает текущее состояние.
 
 ## Полезные параметры
 
@@ -154,7 +178,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ProgramFiles%\DesktopS
 
 В архиве `dist/DesktopSwitch-portable.zip` лежит папка для просмотра. Её распаковывают на локальный диск и запускают `Start-DesktopSwitch.vbs`. Установка и права администратора не нужны. В `config.json` этой копии `Preview` равен `true`: окно и значок у часов есть, рабочий стол не переключается. Чтобы включить переключение, поставьте `Preview` в `false` и `Enabled` в `true`.
 
-Программа написана на Windows PowerShell 5.1. Отдельного файла формы нет: окно, кнопка и список новостей создаются кодом Windows Forms в `DesktopSwitch.Widget.ps1`. `DesktopSwitch.ps1` следит за сетью, `DesktopSwitch.Logic.ps1` принимает решение о переключении стола.
+Программа написана на Windows PowerShell 5.1. Отдельного файла формы нет: окно, кнопка и список новостей создаются кодом Windows Forms в `DesktopSwitch.Widget.ps1`. `DesktopSwitch.ps1` следит за сетью, `DesktopSwitch.Logic.ps1` принимает решение о переключении стола. `DesktopSwitch.exe` — оконная оболочка без консоли: процесс в диспетчере задач называется DesktopSwitch, а скрипты выполняются внутри него.
 
 ## Кнопка поддержки
 
@@ -224,7 +248,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Uninstall-DesktopSwitc
 
 Локальный путь не должен быть корнем диска, файлом или ссылкой на другую папку. В этих случаях программа оставляет текущий рабочий стол и пишет причину в журнал.
 
-Если AppLocker или политика выполнения запрещают скрипты, для `DesktopSwitch.ps1` нужно отдельное разрешение. Запуск идёт с `-ExecutionPolicy Bypass` и не меняет политику компьютера.
+Если AppLocker или политика выполнения запрещают скрипты, для папки `C:\Program Files\DesktopSwitch` нужно отдельное разрешение. `DesktopSwitch.exe` на время своего процесса выставляет Bypass и не меняет политику компьютера. Правило AppLocker, которое запрещает сами файлы `.ps1`, при этом остаётся в силе.
 
 ## Проверка логики
 

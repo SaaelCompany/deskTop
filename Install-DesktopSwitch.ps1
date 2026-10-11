@@ -40,6 +40,10 @@ if ($problems.Count -gt 0) {
 }
 
 function Stop-DesktopSwitchMonitor {
+    foreach ($proc in @(Get-Process -Name 'DesktopSwitch' -ErrorAction SilentlyContinue)) {
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        Write-Host ("Остановлен DesktopSwitch.exe, процесс {0}." -f $proc.Id)
+    }
     foreach ($name in @('powershell.exe', 'pwsh.exe')) {
         $procs = @(Get-CimInstance Win32_Process -Filter "Name = '$name'" -ErrorAction SilentlyContinue)
         foreach ($proc in $procs) {
@@ -75,6 +79,7 @@ function Copy-DesktopSwitchPackage {
         New-Item -ItemType Directory -Path $destFull -Force | Out-Null
     }
     $names = @(
+        'DesktopSwitch.exe',
         'DesktopSwitch.ps1',
         'DesktopSwitch.Logic.ps1',
         'DesktopSwitch.Widget.ps1',
@@ -107,12 +112,20 @@ function Copy-DesktopSwitchPackage {
     return $destFull
 }
 
+Stop-DesktopSwitchMonitor
+Start-Sleep -Seconds 1
+
 $packageRoot = $PSScriptRoot
 if (-not [string]::IsNullOrWhiteSpace($InstallDir)) {
     $packageRoot = Copy-DesktopSwitchPackage -Source $PSScriptRoot -Destination $InstallDir
     Write-Host ("Пакет скопирован: {0}" -f $packageRoot)
 }
 $monitor = (Resolve-Path -LiteralPath (Join-Path $packageRoot 'DesktopSwitch.ps1')).Path
+$exePath = Join-Path $packageRoot 'DesktopSwitch.exe'
+$exeFull = ''
+if (Test-Path -LiteralPath $exePath) {
+    $exeFull = (Resolve-Path -LiteralPath $exePath).Path
+}
 $identityName = Get-InstallerIdentityName
 $systemAccount = Test-InstallerSystemAccount $identityName
 $scope = Resolve-InstallerStartupScope -AllUsers ([bool]$AllUsers) -SystemAccount $systemAccount
@@ -120,31 +133,42 @@ if ($systemAccount -and -not $AllUsers) {
     Write-Host 'Учётная запись установки — SYSTEM. Автозапуск будет общим для всех пользователей.'
 }
 
-Stop-DesktopSwitchMonitor
-Start-Sleep -Seconds 1
-
 if ($scope -eq 'AllUsers') {
     $startup = [Environment]::GetFolderPath('CommonStartup')
 } else {
     $startup = [Environment]::GetFolderPath('Startup')
 }
 if ([string]::IsNullOrWhiteSpace($startup)) { throw 'Не удалось определить папку автозагрузки.' }
+$vbsPath = Join-Path $startup 'DesktopSwitch.vbs'
 
-$escaped = $monitor.Replace('"', '""')
-$vbs = @"
+if (-not [string]::IsNullOrWhiteSpace($exeFull)) {
+    $escaped = $exeFull.Replace('"', '""')
+    $vbs = @"
+Set shell = CreateObject("Wscript.Shell")
+shell.Run """$escaped""", 0, False
+"@.Trim()
+    $encoding = 'ASCII'
+    if ($exeFull -match '[^\x00-\x7F]') { $encoding = 'Unicode' }
+} else {
+    $escaped = $monitor.Replace('"', '""')
+    $vbs = @"
 Set shell = CreateObject("Wscript.Shell")
 shell.Run "powershell.exe -NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File ""$escaped""", 0, False
 "@.Trim()
-$vbsPath = Join-Path $startup 'DesktopSwitch.vbs'
-$encoding = 'ASCII'
-if ($monitor -match '[^\x00-\x7F]') { $encoding = 'Unicode' }
+    $encoding = 'ASCII'
+    if ($monitor -match '[^\x00-\x7F]') { $encoding = 'Unicode' }
+}
 Set-Content -LiteralPath $vbsPath -Value $vbs -Encoding $encoding
 Write-Host ("Автозапуск создан: {0}" -f $vbsPath)
 
 if ($ScheduledTask) {
     try {
-        $argument = '-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $monitor
-        $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $argument
+        if (-not [string]::IsNullOrWhiteSpace($exeFull)) {
+            $action = New-ScheduledTaskAction -Execute $exeFull
+        } else {
+            $argument = '-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $monitor
+            $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $argument
+        }
         $trigger = New-ScheduledTaskTrigger -AtLogOn
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
         $settings.ExecutionTimeLimit = [TimeSpan]::Zero
@@ -161,8 +185,12 @@ if ($ScheduledTask) {
 }
 
 if (Test-InstallerShouldLaunch -SystemAccount $systemAccount -NoLaunch ([bool]$NoLaunch)) {
-    $launch = '-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $monitor
-    Start-Process -FilePath 'powershell.exe' -ArgumentList $launch -WindowStyle Hidden
+    if (-not [string]::IsNullOrWhiteSpace($exeFull)) {
+        Start-Process -FilePath $exeFull -WindowStyle Hidden
+    } else {
+        $launch = '-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $monitor
+        Start-Process -FilePath 'powershell.exe' -ArgumentList $launch -WindowStyle Hidden
+    }
     Write-Host 'Монитор запущен.'
 } else {
     Write-Host 'Монитор запустится при следующем входе пользователя.'

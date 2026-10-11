@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.26'
+$script:Version = '1.2.27'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -801,7 +801,7 @@ if (-not $script:Cfg.Enabled -and -not $WhatIf) {
 
 if (-not $WhatIf) {
     if (-not (Enter-SingleInstance)) {
-        Show-StartupProblem 'Программа уже запущена в этом сеансе. Посмотрите значок у часов и правый нижний угол. Если окна нет, закройте powershell.exe в диспетчере задач и запустите снова.'
+        Show-StartupProblem 'Программа уже запущена в этом сеансе. Посмотрите значок у часов и правый нижний угол. Если окна нет, завершите процесс DesktopSwitch или Windows PowerShell в диспетчере задач и запустите снова.'
         exit 0
     }
 }

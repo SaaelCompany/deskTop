@@ -39,11 +39,18 @@ if ($removeCommon) {
 }
 
 foreach ($folder in $folders) {
-    $vbsPath = Join-Path $folder 'DesktopSwitch.vbs'
-    if (Test-Path -LiteralPath $vbsPath) {
-        Remove-Item -LiteralPath $vbsPath -Force
-        Write-Host ("Удалён автозапуск: {0}" -f $vbsPath)
+    foreach ($name in @('DesktopSwitch.vbs', 'DesktopSwitch.lnk')) {
+        $itemPath = Join-Path $folder $name
+        if (Test-Path -LiteralPath $itemPath) {
+            Remove-Item -LiteralPath $itemPath -Force
+            Write-Host ("Удалён автозапуск: {0}" -f $itemPath)
+        }
     }
+}
+
+foreach ($proc in @(Get-Process -Name 'DesktopSwitch' -ErrorAction SilentlyContinue)) {
+    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    Write-Host ("Остановлен DesktopSwitch.exe, процесс {0}." -f $proc.Id)
 }
 
 foreach ($name in @('powershell.exe', 'pwsh.exe')) {

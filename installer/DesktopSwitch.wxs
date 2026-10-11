@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="56B1F1E4-9016-4774-9834-002377EC184B"
+           Name="DesktopSwitch"
+           Language="1033"
+           Version="1.2.27"
+           Manufacturer="SaaelCompany"
+           UpgradeCode="4048E9C4-7965-48DC-A23D-A4554966E57F">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of DesktopSwitch is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="ProductIcon" SourceFile="DesktopSwitch.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
+    <Property Id="ARPCOMMENTS" Value="Local desktop fallback and service desk button" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR" Name="DesktopSwitch">
+          <Component Id="CmpMain" Guid="7716602D-727B-4FF1-AA39-C1EE1F76386A" Win64="yes">
+            <File Id="FilExe" Source="DesktopSwitch.exe" KeyPath="yes" />
+            <File Id="FilMain" Source="DesktopSwitch.ps1" />
+            <File Id="FilLogic" Source="DesktopSwitch.Logic.ps1" />
+            <File Id="FilWidget" Source="DesktopSwitch.Widget.ps1" />
+            <File Id="FilInstall" Source="Install-DesktopSwitch.ps1" />
+            <File Id="FilUninstall" Source="Uninstall-DesktopSwitch.ps1" />
+            <File Id="FilStatus" Source="Show-DesktopSwitchStatus.cmd" />
+            <File Id="FilConfig" Source="config.json" />
+            <File Id="FilExample" Source="config.example.json" />
+            <File Id="FilReadme" Source="README.md" />
+          </Component>
+          <Directory Id="ExamplesDir" Name="examples">
+            <Component Id="CmpExamples" Guid="13EF611A-59D1-47D3-80F2-22AE681F4CAE" Win64="yes">
+              <File Id="FilNews" Source="examples/news.json" KeyPath="yes" />
+            </Component>
+          </Directory>
+        </Directory>
+      </Directory>
+      <Directory Id="CommonStartupFolder">
+        <Component Id="CmpStartup" Guid="ED44CD4A-DF9A-4C91-BADE-95F940FE9F64" Win64="yes">
+          <Shortcut Id="ScStart"
+                    Name="DesktopSwitch"
+                    Description="DesktopSwitch"
+                    Target="[INSTALLDIR]DesktopSwitch.exe"
+                    WorkingDirectory="INSTALLDIR"
+                    Icon="ProductIcon" />
+          <RegistryValue Root="HKLM" Key="Software\SaaelCompany\DesktopSwitch" Name="Version" Type="string" Value="1.2.27" KeyPath="yes" />
+          <RegistryValue Root="HKLM" Key="Software\SaaelCompany\DesktopSwitch" Name="InstallDir" Type="string" Value="[INSTALLDIR]" />
+        </Component>
+      </Directory>
+    </Directory>
+    <Feature Id="Main" Title="DesktopSwitch" Level="1">
+      <ComponentRef Id="CmpMain" />
+      <ComponentRef Id="CmpExamples" />
+      <ComponentRef Id="CmpStartup" />
+    </Feature>
+  </Product>
+</Wix>
