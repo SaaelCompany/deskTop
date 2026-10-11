@@ -296,13 +296,7 @@ public static class DeskLayer {
                             clip.AddEllipse(1, 1, 50, 50);
                             g.SetClip(clip);
                         }
-                        float fade = ((fillArgb >> 24) & 255) / 255f;
-                        using (ImageAttributes attr = new ImageAttributes()) {
-                            ColorMatrix matrix = new ColorMatrix();
-                            matrix.Matrix33 = fade;
-                            attr.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
-                            g.DrawImage(image, new Rectangle(6, 6, 40, 40), 0, 0, image.Width, image.Height, GraphicsUnit.Pixel, attr);
-                        }
+                        g.DrawImage(image, new Rectangle(6, 6, 40, 40));
                         g.ResetClip();
                         drewIcon = true;
                     }
