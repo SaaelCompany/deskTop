@@ -280,6 +280,15 @@ $replayItems = @(
 $replay = @(Get-NoticesToShow -Items $replayItems -SeenIds $replaySeen -Max 3)
 Assert-Equal 'restart skips shown news' $replay.Count 1
 Assert-Equal 'restart shows a new key' $replay[0].Id 'OPS-3'
+$noticeNow = [datetime]::Parse('2026-10-11T12:00:00Z')
+$keptLog = Merge-NoticeLog -Existing @() -Incoming @([pscustomobject]@{ Id = 'OPS-9'; Title = 'Первая'; Body = 'Текст'; Kind = 'news'; Url = ''; PublishedAt = '2026-10-11T11:00:00Z' }) -Now $noticeNow
+Assert-Equal 'day log count' $keptLog.Count 1
+Assert-Equal 'day log title' $keptLog[0].Title 'Первая'
+$refreshedLog = Merge-NoticeLog -Existing $keptLog -Incoming @([pscustomobject]@{ Id = 'OPS-9'; Title = 'Первая правка'; Body = 'Текст'; Kind = 'news'; Url = ''; PublishedAt = '2026-10-11T11:00:00Z' }) -Now $noticeNow.AddHours(2)
+Assert-Equal 'day log title refresh' $refreshedLog[0].Title 'Первая правка'
+Assert-Equal 'day log keeps arrival' $refreshedLog[0].ReceivedAt $keptLog[0].ReceivedAt
+$expiredLog = Merge-NoticeLog -Existing $keptLog -Incoming @() -Now $noticeNow.AddHours(25)
+Assert-Equal 'day log expires' $expiredLog.Count 0
 $exampleConfig = Get-EffectiveDesktopConfig $example
 Assert-Equal 'example stays disabled' $exampleConfig.Enabled $false
 Assert-Equal 'example follows policy' $exampleConfig.NetworkDesktopPath ''

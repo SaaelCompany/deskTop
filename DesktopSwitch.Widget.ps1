@@ -314,11 +314,27 @@ public static class DeskLayer {
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
             g.Clear(Color.Transparent);
             Color fill = Color.FromArgb(fillArgb);
-            using (SolidBrush brush = new SolidBrush(fill)) {
+            if (open) {
+                Color plate = Color.FromArgb(255, fill.R, fill.G, fill.B);
+                if (plate.R + plate.G + plate.B < 48) plate = Color.FromArgb(255, 47, 107, 255);
+                using (SolidBrush plateBrush = new SolidBrush(plate)) {
+                    g.FillEllipse(plateBrush, 0.5f, 0.5f, 51f, 51f);
+                }
+                using (Pen pen = new Pen(Color.White, 2.6f)) {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Round;
+                    pen.LineJoin = LineJoin.Round;
+                    g.DrawLine(pen, 18f, 18f, 34f, 34f);
+                    g.DrawLine(pen, 34f, 18f, 18f, 34f);
+                }
+            } else {
+            Color disc = fill;
+            if (disc.A < 1) disc = Color.FromArgb(1, fill.R, fill.G, fill.B);
+            using (SolidBrush brush = new SolidBrush(disc)) {
                 g.FillEllipse(brush, 0.5f, 0.5f, 51f, 51f);
             }
             bool drewIcon = false;
-            if (!open && !string.IsNullOrEmpty(iconPath) && File.Exists(iconPath)) {
+            if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath)) {
                 try {
                     using (FileStream stream = new FileStream(iconPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                     using (Image image = Image.FromStream(stream)) {
@@ -340,17 +356,13 @@ public static class DeskLayer {
                     pen.StartCap = LineCap.Round;
                     pen.EndCap = LineCap.Round;
                     pen.LineJoin = LineJoin.Round;
-                    if (open) {
-                        g.DrawLine(pen, 19.5f, 19.5f, 32.5f, 32.5f);
-                        g.DrawLine(pen, 32.5f, 19.5f, 19.5f, 32.5f);
-                    } else {
-                        using (GraphicsPath bubble = RoundRect(15, 16, 22, 16, 7)) {
-                            g.DrawPath(pen, bubble);
-                        }
-                        g.DrawLine(pen, 22, 31, 19, 36);
-                        g.DrawLine(pen, 19, 36, 27, 31);
+                    using (GraphicsPath bubble = RoundRect(15, 16, 22, 16, 7)) {
+                        g.DrawPath(pen, bubble);
                     }
+                    g.DrawLine(pen, 22, 31, 19, 36);
+                    g.DrawLine(pen, 19, 36, 27, 31);
                 }
+            }
             }
             if (badge > 0 && !open) DrawNoticeBadge(g, badge, size);
         }
@@ -855,6 +867,14 @@ function Get-NewsSignature {
     return [string]::Join("`n", $parts.ToArray())
 }
 
+function Import-NoticeLog {
+    $existing = @()
+    if ($script:State) { $existing = $script:State.NoticeLog }
+    $log = Merge-NoticeLog -Existing $existing -Incoming @() -Now (Get-Date)
+    if ($script:State) { $script:State.NoticeLog = $log }
+    $script:NewsItems = (ConvertTo-NoticeLogItems $log).ToArray()
+}
+
 function Import-ReadNoticeIds {
     if ($script:ReadNoticesImported) { return }
     $script:ReadNoticesImported = $true
@@ -903,19 +923,17 @@ function Get-UnopenedNoticeCount {
 
 function Mark-NoticesOpened {
     Import-ReadNoticeIds
-    $changed = $false
+    $ids = New-Object System.Collections.Generic.List[string]
     foreach ($item in @($script:NewsItems)) {
         if ($null -eq $item) { continue }
-        $id = [string]$item.Id
+        $id = (Get-NoticeField $item 'Id').Trim()
         if ([string]::IsNullOrWhiteSpace($id)) { continue }
         $script:OpenedNoticeIds[$id] = $true
-        if (-not $script:ReadNoticeIds.ContainsKey($id)) {
-            $script:ReadNoticeIds[$id] = $true
-            $changed = $true
-        }
+        $ids.Add($id)
     }
-    if ($changed -and $script:State) {
-        Save-ReadNoticeIds
+    if ($ids.Count -gt 0 -and $script:State) {
+        $script:State.SeenNoticeIds = Merge-NoticeIds -Existing $script:State.SeenNoticeIds -More $ids.ToArray()
+        Save-StateTable $script:State
     }
 }
 
@@ -932,14 +950,6 @@ function Test-NoticeLinkEnabled {
 function Enter-NewsReading {
     if ($script:NewsReading) { return }
     $script:NewsReading = $true
-    Import-ReadNoticeIds
-    $script:NewsPinnedIds = @{}
-    foreach ($item in @($script:NewsItems)) {
-        if ($null -eq $item) { continue }
-        $id = [string]$item.Id
-        if ([string]::IsNullOrWhiteSpace($id)) { continue }
-        if (-not $script:ReadNoticeIds.ContainsKey($id)) { $script:NewsPinnedIds[$id] = $true }
-    }
     Mark-NoticesOpened
     $script:NewsSignature = $null
     Update-NewsRows
@@ -948,10 +958,6 @@ function Enter-NewsReading {
 
 function Leave-NewsReading {
     $script:NewsReading = $false
-    if ($script:NewsPinnedIds.Count -eq 0) { return }
-    $script:NewsPinnedIds = @{}
-    $script:NewsSignature = $null
-    Update-NewsRows
 }
 
 function Set-SupportBounds {
@@ -1512,29 +1518,15 @@ function Update-NewsRows {
     if ($null -eq $script:WidgetUi) { return }
     $list = $script:WidgetUi.NewsList
     Clear-ChildControls $list
-    Import-ReadNoticeIds
     $visible = New-Object System.Collections.Generic.List[object]
     foreach ($candidate in @($script:NewsItems)) {
         if ($null -eq $candidate) { continue }
-        $candidateId = [string]$candidate.Id
-        $pinned = $false
-        $read = $false
-        if (-not [string]::IsNullOrWhiteSpace($candidateId)) {
-            if ($script:NewsPinnedIds.ContainsKey($candidateId)) { $pinned = $true }
-            if ($script:ReadNoticeIds.ContainsKey($candidateId)) { $read = $true }
-        }
-        if ($read -and -not $pinned) { continue }
         $visible.Add($candidate)
     }
     $items = @($visible.ToArray())
-    $hadAny = $false
-    foreach ($candidate in @($script:NewsItems)) {
-        if ($null -ne $candidate) { $hadAny = $true }
-    }
     if ($items.Count -eq 0) {
         $empty = New-Object System.Windows.Forms.Label
-        if ($hadAny) { $empty.Text = 'Новых сообщений нет' }
-        else { $empty.Text = 'Пока нет сообщений' }
+        $empty.Text = 'Пока нет сообщений'
         $empty.TextAlign = 'MiddleCenter'
         $empty.Font = $script:TabFontBold
         $empty.ForeColor = Get-ThemeColor Empty
@@ -1542,8 +1534,7 @@ function Update-NewsRows {
         $emptyWidth = [int]$script:SupportPanelWidth - 32
         $empty.SetBounds(16, 48, $emptyWidth, 24)
         $hint = New-Object System.Windows.Forms.Label
-        if ($hadAny) { $hint.Text = 'Прочитанные сообщения скрыты.' }
-        else { $hint.Text = 'Здесь будут новости и технические работы.' }
+        $hint.Text = 'Сообщения остаются здесь сутки.'
         $hint.TextAlign = 'MiddleCenter'
         $hint.Font = $script:TabFont
         $hint.ForeColor = Get-ThemeColor Muted
@@ -1880,11 +1871,28 @@ function New-LauncherButton {
         $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
         $fill = Get-LauncherFill
         if ($script:LauncherHot) { $fill = Get-LauncherFill -Hover }
-        $brush = New-Object System.Drawing.SolidBrush $fill
+        if ($script:PanelOpen) {
+            $plateColor = [System.Drawing.Color]::FromArgb(255, $fill.R, $fill.G, $fill.B)
+            if (($plateColor.R + $plateColor.G + $plateColor.B) -lt 48) {
+                $plateColor = [System.Drawing.Color]::FromArgb(255, 47, 107, 255)
+            }
+            $plate = New-Object System.Drawing.SolidBrush $plateColor
+            $g.FillEllipse($plate, 0, 0, 51, 51)
+            $plate.Dispose()
+            $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White, 2.6)
+            $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+            $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+            $g.DrawLine($pen, 18, 18, 34, 34)
+            $g.DrawLine($pen, 34, 18, 18, 34)
+            $pen.Dispose()
+        } else {
+        $disc = $fill
+        if ($disc.A -lt 1) { $disc = [System.Drawing.Color]::FromArgb(1, $fill.R, $fill.G, $fill.B) }
+        $brush = New-Object System.Drawing.SolidBrush $disc
         $g.FillEllipse($brush, 0, 0, 51, 51)
         $brush.Dispose()
         $drewIcon = $false
-        if (-not $script:PanelOpen -and $script:Cfg -and -not [string]::IsNullOrWhiteSpace([string]$script:Cfg.WidgetIcon)) {
+        if ($script:Cfg -and -not [string]::IsNullOrWhiteSpace([string]$script:Cfg.WidgetIcon)) {
             $iconPath = Resolve-WidgetIconPath ([string]$script:Cfg.WidgetIcon)
             if (-not [string]::IsNullOrWhiteSpace($iconPath)) {
                 $stream = $null
@@ -1911,19 +1919,15 @@ function New-LauncherButton {
             $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White, 1.6)
             $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
             $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-            if ($script:PanelOpen) {
-                $g.DrawLine($pen, 19.5, 19.5, 32.5, 32.5)
-                $g.DrawLine($pen, 32.5, 19.5, 19.5, 32.5)
-            } else {
-                $bubble = New-RoundedPath -Width 22 -Height 16 -Radius 7
-                $g.TranslateTransform(15, 16)
-                $g.DrawPath($pen, $bubble)
-                $g.ResetTransform()
-                $bubble.Dispose()
-                $g.DrawLine($pen, 22, 31, 19, 36)
-                $g.DrawLine($pen, 19, 36, 27, 31)
-            }
+            $bubble = New-RoundedPath -Width 22 -Height 16 -Radius 7
+            $g.TranslateTransform(15, 16)
+            $g.DrawPath($pen, $bubble)
+            $g.ResetTransform()
+            $bubble.Dispose()
+            $g.DrawLine($pen, 22, 31, 19, 36)
+            $g.DrawLine($pen, 19, 36, 27, 31)
             $pen.Dispose()
+        }
         }
         $count = Get-LauncherBadgeCount
         if ($count -gt 0) {
@@ -2055,12 +2059,12 @@ function New-SupportPanel {
     $close.Text = [string][char]0xE711
     $close.Font = $script:IconFont
     $close.TextAlign = 'MiddleCenter'
-    $close.ForeColor = $muted
+    $close.ForeColor = $ink
     $close.BackColor = $headerColor
     $close.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $close.SetBounds(($panelW - 52), 16, 32, 32)
-    $close.Add_MouseEnter({ $this.ForeColor = Get-ThemeColor Ink })
-    $close.Add_MouseLeave({ $this.ForeColor = Get-ThemeColor Muted })
+    $close.SetBounds(($panelW - 60), 8, 48, 48)
+    $close.Add_MouseEnter({ $this.ForeColor = Get-ThemeColor Ink; $this.BackColor = Get-ThemeColor Hover })
+    $close.Add_MouseLeave({ $this.ForeColor = Get-ThemeColor Ink; $this.BackColor = Get-ThemeColor Canvas })
     $close.Add_Click({ Hide-SupportPanel })
     $header.Controls.Add($mark)
     $header.Controls.Add($title)
@@ -2696,6 +2700,7 @@ function New-DesktopWidget {
     $script:PanelForm = $null
     $launcher = New-LauncherButton
     $script:WidgetForm = $launcher
+    Import-NoticeLog
     $script:PanelForm = New-SupportPanel
     $script:PanelForm.Owner = $launcher
     $script:NewsSignature = $null
@@ -2817,21 +2822,20 @@ function Set-NewsPopupBounds {
     $button = 52
     $popupW = $script:NewsPopup.Width
     $popupH = $script:NewsPopup.Height
-    $gap = 12
+    $gap = 8
     $x = $screen.Left + $margin
     $y = $screen.Top + $margin
-    if ($corner -eq 'BottomRight' -or $corner -eq 'TopRight') { $x = $screen.Right - $button - $margin }
-    if ($corner -eq 'BottomRight' -or $corner -eq 'BottomLeft') { $y = $screen.Bottom - $button - $margin }
-    $px = $x + $button - $popupW
-    $py = $y - $gap - $popupH
-    if ($corner -eq 'BottomLeft' -or $corner -eq 'TopLeft') { $px = $x }
-    if ($corner -eq 'TopLeft' -or $corner -eq 'TopRight') { $py = $y + $button + $gap }
-    $panelOpen = $script:PanelOpen -and $null -ne $script:PanelForm -and -not $script:PanelForm.IsDisposed -and $script:PanelForm.Visible
-    if ($panelOpen) {
-        $px = $script:PanelForm.Left - $gap - $popupW
-        $py = $script:PanelForm.Top
-        if ($corner -eq 'BottomLeft' -or $corner -eq 'TopLeft') { $px = $script:PanelForm.Right + $gap }
+    if ($script:WidgetForm -and -not $script:WidgetForm.IsDisposed) {
+        $x = $script:WidgetForm.Left
+        $y = $script:WidgetForm.Top
+    } else {
+        if ($corner -eq 'BottomRight' -or $corner -eq 'TopRight') { $x = $screen.Right - $button - $margin }
+        if ($corner -eq 'BottomRight' -or $corner -eq 'BottomLeft') { $y = $screen.Bottom - $button - $margin }
     }
+    $rightSide = ($corner -eq 'BottomRight' -or $corner -eq 'TopRight')
+    $bottomSide = ($corner -eq 'BottomRight' -or $corner -eq 'BottomLeft')
+    if ($rightSide) { $px = $x - $gap - $popupW } else { $px = $x + $button + $gap }
+    if ($bottomSide) { $py = $y + $button - $popupH } else { $py = $y }
     if ($px -lt ($screen.Left + 8)) { $px = $screen.Left + 8 }
     if (($px + $popupW) -gt ($screen.Right - 8)) { $px = $screen.Right - $popupW - 8 }
     if ($py -lt ($screen.Top + 8)) { $py = $screen.Top + 8 }
@@ -2875,7 +2879,7 @@ function Ensure-NewsPopup {
     $form.Font = $script:TabFont
     $form.Text = 'Новости'
     $header = New-Object System.Windows.Forms.Panel
-    $header.SetBounds(0, 0, 280, 36)
+    $header.SetBounds(0, 0, 280, 44)
     $header.BackColor = $canvas
     $title = New-Object System.Windows.Forms.Label
     $title.Text = 'Новости'
@@ -2887,23 +2891,23 @@ function Ensure-NewsPopup {
     $title.Add_Click({ Open-NewsFromPopup })
     $close = New-Object System.Windows.Forms.Label
     $close.Text = [string][char]0xE711
-    $close.SetBounds(244, 2, 32, 32)
+    $close.SetBounds(232, 0, 48, 44)
     $close.TextAlign = 'MiddleCenter'
     $close.BackColor = $canvas
-    $close.ForeColor = $muted
+    $close.ForeColor = $ink
     $close.Font = $script:IconFont
     $close.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $close.Add_MouseEnter({ $this.ForeColor = Get-ThemeColor Ink })
-    $close.Add_MouseLeave({ $this.ForeColor = Get-ThemeColor Muted })
+    $close.Add_MouseEnter({ $this.ForeColor = Get-ThemeColor Ink; $this.BackColor = Get-ThemeColor Hover })
+    $close.Add_MouseLeave({ $this.ForeColor = Get-ThemeColor Ink; $this.BackColor = Get-ThemeColor Canvas })
     $close.Add_Click({ Hide-NewsPopup })
     $headerRule = New-Object System.Windows.Forms.Panel
-    $headerRule.SetBounds(12, 35, 256, 1)
+    $headerRule.SetBounds(12, 43, 256, 1)
     $headerRule.BackColor = $ruleColor
     $header.Controls.Add($title)
     $header.Controls.Add($close)
     $header.Controls.Add($headerRule)
     $body = New-Object System.Windows.Forms.Panel
-    $body.SetBounds(0, 36, 280, 84)
+    $body.SetBounds(0, 44, 280, 84)
     $body.BackColor = $canvas
     $form.Controls.Add($header)
     $form.Controls.Add($body)
@@ -2974,8 +2978,8 @@ function Show-NewsPopup {
         $y += 48
     }
     $bodyHeight = $y + 6
-    $script:NewsPopupBody.SetBounds(0, 36, 280, $bodyHeight)
-    $total = 36 + $bodyHeight
+    $script:NewsPopupBody.SetBounds(0, 44, 280, $bodyHeight)
+    $total = 44 + $bodyHeight
     $script:NewsPopup.ClientSize = New-Object System.Drawing.Size(280, $total)
     $script:NewsPopup.Region = New-Object System.Drawing.Region((New-RoundedPath -Width 280 -Height $total -Radius 14))
     Invoke-WindowChrome -Form $script:NewsPopup
@@ -3040,23 +3044,19 @@ function Update-WidgetNews {
             }
         }
         if ($loaded) {
-            $script:NewsItems = @(Sort-Notices $items.ToArray())
-            if ($script:NewsReading) {
-                foreach ($item in @($script:NewsItems)) {
-                    if ($null -eq $item) { continue }
-                    $id = [string]$item.Id
-                    if ([string]::IsNullOrWhiteSpace($id)) { continue }
-                    if (-not $script:ReadNoticeIds.ContainsKey($id)) { $script:NewsPinnedIds[$id] = $true }
-                }
-                Mark-NoticesOpened
-            }
+            $existingLog = @()
+            if ($script:State) { $existingLog = $script:State.NoticeLog }
+            $log = Merge-NoticeLog -Existing $existingLog -Incoming $items.ToArray() -Now (Get-Date)
+            if ($script:State) { $script:State.NoticeLog = $log }
+            $script:NewsItems = (ConvertTo-NoticeLogItems $log).ToArray()
+            if ($script:NewsReading) { Mark-NoticesOpened }
         }
         Import-ReadNoticeIds
         $seen = @()
         if ($script:State) {
             $seen = Merge-NoticeIds -Existing $script:State.SeenNoticeIds -More $script:State.ReadNoticeIds
         }
-        $fresh = @(Get-NoticesToShow -Items $script:NewsItems -SeenIds $seen -Max 3)
+        $fresh = @(Get-NoticesToShow -Items $items.ToArray() -SeenIds $seen -Max 3)
         if ($fresh.Count -gt 0) {
             try {
                 Show-NewsPopup -Notices $fresh
@@ -3068,18 +3068,16 @@ function Update-WidgetNews {
             $freshIds = New-Object System.Collections.Generic.List[string]
             foreach ($item in $fresh) {
                 if ($null -eq $item) { continue }
-                $id = [string]$item.Id
+                $id = (Get-NoticeField $item 'Id').Trim()
                 if ([string]::IsNullOrWhiteSpace($id)) { continue }
                 $freshIds.Add($id)
-                $script:ReadNoticeIds[$id] = $true
-                $script:OpenedNoticeIds[$id] = $true
-                $script:NewsPinnedIds[$id] = $true
             }
             if ($script:State) {
                 $script:State.SeenNoticeIds = Merge-NoticeIds -Existing $script:State.SeenNoticeIds -More $freshIds.ToArray()
-                $script:State.ReadNoticeIds = Merge-NoticeIds -Existing $script:State.ReadNoticeIds -More $freshIds.ToArray()
                 Save-StateTable $script:State
             }
+        } elseif ($script:State) {
+            Save-StateTable $script:State
         }
     } catch {
         Write-Log ("Новости не загрузились: {0}" -f $_.Exception.Message) 'WARN'

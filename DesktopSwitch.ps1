@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.23'
+$script:Version = '1.2.24'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -509,6 +509,7 @@ function Read-StateTable {
         LastExplorerRestartAt = ''
         SeenNoticeIds = @()
         ReadNoticeIds = @()
+        NoticeLog = @()
         ShowLauncher = $true
         StayOnTop = $true
         UpdatedAt = ''

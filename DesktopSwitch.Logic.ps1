@@ -1026,6 +1026,130 @@ function ConvertTo-IdList {
     return ,$list
 }
 
+function Get-NoticeField {
+    param($Item, [string]$Name)
+    if ($null -eq $Item -or [string]::IsNullOrWhiteSpace($Name)) { return '' }
+    if ($Item -is [System.Collections.IDictionary]) {
+        foreach ($key in @($Item.Keys)) {
+            if ([string]$key -eq $Name) { return [string]$Item[$key] }
+        }
+        return ''
+    }
+    $prop = $Item.PSObject.Properties[$Name]
+    if ($null -eq $prop -or $null -eq $prop.Value) { return '' }
+    return [string]$prop.Value
+}
+
+function ConvertTo-NoticeLogItems {
+    param($Value)
+    $list = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Value) { return ,$list }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $list.Add($Value)
+        return ,$list
+    }
+    foreach ($item in @($Value)) {
+        if ($null -eq $item) { continue }
+        if ($item -is [string]) { continue }
+        $list.Add($item)
+    }
+    return ,$list
+}
+
+function Test-NoticeKept {
+    param([string]$ReceivedAt, $Now, [int]$Hours = 24)
+    if ($Hours -lt 1) { $Hours = 24 }
+    $stampText = ConvertTo-NoticeTime $ReceivedAt
+    if ([string]::IsNullOrWhiteSpace($stampText)) { return $false }
+    $stamp = [datetime]::MinValue
+    $parsed = [datetime]::TryParse($stampText, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$stamp)
+    if (-not $parsed) { return $false }
+    $moment = [datetime]::UtcNow
+    if ($Now -is [datetime]) { $moment = $Now }
+    $age = $moment.ToUniversalTime() - $stamp.ToUniversalTime()
+    if ($age.TotalHours -lt -1) { return $false }
+    return ($age.TotalHours -lt $Hours)
+}
+
+function Merge-NoticeLog {
+    param($Existing, $Incoming, $Now)
+    $moment = [datetime]::UtcNow
+    if ($Now -is [datetime]) { $moment = $Now }
+    $receivedNow = $moment.ToUniversalTime().ToString('o')
+    $byId = @{}
+    $order = New-Object System.Collections.Generic.List[string]
+    foreach ($item in (ConvertTo-NoticeLogItems $Existing)) {
+        $id = (Get-NoticeField $item 'Id').Trim()
+        if ([string]::IsNullOrWhiteSpace($id)) { continue }
+        $received = (Get-NoticeField $item 'ReceivedAt').Trim()
+        if (-not (Test-NoticeKept -ReceivedAt $received -Now $moment)) { continue }
+        if ($byId.ContainsKey($id)) { continue }
+        $byId[$id] = @{
+            Id = $id
+            Title = (Get-NoticeField $item 'Title').Trim()
+            Body = (Get-NoticeField $item 'Body').Trim()
+            Kind = (Get-NoticeField $item 'Kind').Trim()
+            Url = (Get-NoticeField $item 'Url').Trim()
+            PublishedAt = (Get-NoticeField $item 'PublishedAt').Trim()
+            ReceivedAt = $received
+        }
+        $order.Add($id)
+    }
+    foreach ($item in (ConvertTo-NoticeLogItems $Incoming)) {
+        $id = (Get-NoticeField $item 'Id').Trim()
+        if ([string]::IsNullOrWhiteSpace($id)) { continue }
+        $title = (Get-NoticeField $item 'Title').Trim()
+        $body = (Get-NoticeField $item 'Body').Trim()
+        $kind = (Get-NoticeField $item 'Kind').Trim()
+        $url = (Get-NoticeField $item 'Url').Trim()
+        $published = (Get-NoticeField $item 'PublishedAt').Trim()
+        if ($byId.ContainsKey($id)) {
+            $kept = $byId[$id]
+            if (-not [string]::IsNullOrWhiteSpace($title)) { $kept.Title = $title }
+            if (-not [string]::IsNullOrWhiteSpace($body)) { $kept.Body = $body }
+            if (-not [string]::IsNullOrWhiteSpace($kind)) { $kept.Kind = $kind }
+            if (-not [string]::IsNullOrWhiteSpace($url)) { $kept.Url = $url }
+            if (-not [string]::IsNullOrWhiteSpace($published)) { $kept.PublishedAt = $published }
+            continue
+        }
+        $byId[$id] = @{
+            Id = $id
+            Title = $title
+            Body = $body
+            Kind = $kind
+            Url = $url
+            PublishedAt = $published
+            ReceivedAt = $receivedNow
+        }
+        $order.Add($id)
+    }
+    $keptItems = New-Object System.Collections.Generic.List[object]
+    foreach ($id in $order) {
+        if (-not $byId.ContainsKey($id)) { continue }
+        $record = $byId[$id]
+        if (-not (Test-NoticeKept -ReceivedAt ([string]$record.ReceivedAt) -Now $moment)) { continue }
+        $keptItems.Add($record)
+    }
+    $arr = $keptItems.ToArray()
+    for ($i = 0; $i -lt $arr.Length; $i++) {
+        for ($j = $i + 1; $j -lt $arr.Length; $j++) {
+            $left = [string]$arr[$i].ReceivedAt
+            $right = [string]$arr[$j].ReceivedAt
+            if ($right -gt $left) {
+                $swap = $arr[$i]
+                $arr[$i] = $arr[$j]
+                $arr[$j] = $swap
+            }
+        }
+    }
+    if ($arr.Length -gt 30) {
+        $trim = New-Object System.Collections.Generic.List[object]
+        for ($i = 0; $i -lt 30; $i++) { $trim.Add($arr[$i]) }
+        $arr = $trim.ToArray()
+    }
+    return ,$arr
+}
+
 function Merge-NoticeIds {
     param($Existing, $More)
     $list = New-Object System.Collections.Generic.List[string]
