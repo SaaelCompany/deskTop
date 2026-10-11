@@ -9,8 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = Path(__file__).resolve().parent
-VERSION = "1.2.28"
-PRODUCT_CODE = "{E7B41C2A-8F03-4D56-A9C1-5B6E0D3F8A24}"
+VERSION = "1.2.29"
+PRODUCT_CODE = "{B6D02F91-4C7A-4E35-8A18-9F1C5D7E2B40}"
 UPGRADE_CODE = "{4048E9C4-7965-48DC-A23D-A4554966E57F}"
 
 

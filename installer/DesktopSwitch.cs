@@ -12,8 +12,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("DesktopSwitch")]
 [assembly: AssemblyProduct("DesktopSwitch")]
 [assembly: AssemblyCompany("SaaelCompany")]
-[assembly: AssemblyVersion("1.2.28.0")]
-[assembly: AssemblyFileVersion("1.2.28.0")]
+[assembly: AssemblyVersion("1.2.29.0")]
+[assembly: AssemblyFileVersion("1.2.29.0")]
 
 internal static class DesktopSwitchHost {
     const string Title = "\u0421\u0435\u0440\u0432\u0438\u0441\u043d\u0430\u044f \u0441\u043b\u0443\u0436\u0431\u0430";
@@ -106,14 +106,14 @@ internal static class DesktopSwitchHost {
                 ps.Commands.Clear();
                 ps.Streams.Error.Clear();
                 var command = new StringBuilder();
-                command.Append("& ").Append(PsQuote(script));
+                command.Append(". ").Append(PsQuote(script));
                 if (status) command.Append(" -Status");
                 if (once) command.Append(" -Once");
                 if (whatIf) command.Append(" -WhatIf");
                 if (!string.IsNullOrWhiteSpace(config)) {
                     command.Append(" -ConfigPath ").Append(PsQuote(config));
                 }
-                ps.AddScript(command.ToString());
+                ps.AddScript(command.ToString(), false);
                 try {
                     ps.Invoke();
                 } catch (Exception ex) {
@@ -162,7 +162,7 @@ internal static class DesktopSwitchHost {
 
     static string Usage(string script) {
         var text = new StringBuilder();
-        text.AppendLine("DesktopSwitch 1.2.28");
+        text.AppendLine("DesktopSwitch 1.2.29");
         text.AppendLine(script);
         text.AppendLine("DesktopSwitch.exe");
         text.AppendLine("DesktopSwitch.exe -Status");

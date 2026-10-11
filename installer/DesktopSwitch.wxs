@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product Id="E7B41C2A-8F03-4D56-A9C1-5B6E0D3F8A24"
+  <Product Id="B6D02F91-4C7A-4E35-8A18-9F1C5D7E2B40"
            Name="DesktopSwitch"
            Language="1033"
-           Version="1.2.28"
+           Version="1.2.29"
            Manufacturer="SaaelCompany"
            UpgradeCode="4048E9C4-7965-48DC-A23D-A4554966E57F">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
@@ -28,7 +28,7 @@
             <File Id="FilConfig" Source="config.json" />
             <File Id="FilExample" Source="config.example.json" />
             <File Id="FilReadme" Source="README.md" />
-            <RegistryValue Root="HKLM" Key="Software\SaaelCompany\DesktopSwitch" Name="Version" Type="string" Value="1.2.28" />
+            <RegistryValue Root="HKLM" Key="Software\SaaelCompany\DesktopSwitch" Name="Version" Type="string" Value="1.2.29" />
             <RegistryValue Root="HKLM" Key="Software\SaaelCompany\DesktopSwitch" Name="InstallDir" Type="string" Value="[INSTALLDIR]" />
             <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="DesktopSwitch" Type="string" Value="&quot;[INSTALLDIR]DesktopSwitch.exe&quot;" />
           </Component>
