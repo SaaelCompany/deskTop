@@ -251,6 +251,21 @@ $newsFeed = @(ConvertFrom-NewsFeed (Get-Content -LiteralPath $newsPath -Raw -Enc
 $phone = @($newsFeed | Where-Object { [string]$_.Id -eq 'phone-2026-10-11' })
 Assert-Equal 'phone notice count' $phone.Count 1
 Assert-Equal 'phone notice kind' $phone[0].Kind 'maintenance'
+$jiraNewsUrl = Get-JiraNewsSearchUrl -BaseUrl 'http://192.168.1.2:8082/' -Jql 'labels = desktop-news ORDER BY updated DESC'
+Assert-Contains 'jira news search' $jiraNewsUrl 'http://192.168.1.2:8082/rest/api/2/search?jql='
+Assert-Contains 'jira news jql' $jiraNewsUrl 'desktop-news'
+Assert-Equal 'jira news url empty without jql' (Get-JiraNewsSearchUrl -BaseUrl 'http://192.168.1.2:8082' -Jql '  ') ''
+$jiraNewsPage = '{"issues":[{"key":"OPS-12","fields":{"summary":"Сбой телефонии","description":"Телефоны молчат","updated":"2026-10-11T09:30:00.000+0300","labels":["desktop-news","maintenance"],"issuetype":{"name":"Задача"}}},{"key":"","fields":{"summary":"пусто"}}]}' | ConvertFrom-Json
+$jiraNews = @(ConvertFrom-JiraNewsIssues -Page $jiraNewsPage -BaseUrl 'http://192.168.1.2:8082')
+Assert-Equal 'jira news count' $jiraNews.Count 1
+Assert-Equal 'jira news id' $jiraNews[0].Id 'OPS-12'
+Assert-Equal 'jira news title' $jiraNews[0].Title 'Сбой телефонии'
+Assert-Equal 'jira news kind' $jiraNews[0].Kind 'maintenance'
+Assert-Equal 'jira news link' $jiraNews[0].Url 'http://192.168.1.2:8082/browse/OPS-12'
+$jiraNewsNone = @(ConvertFrom-JiraNewsIssues -Page ('{"issues":[]}' | ConvertFrom-Json) -BaseUrl 'http://192.168.1.2:8082')
+Assert-Equal 'jira news none' $jiraNewsNone.Count 0
+$jiraNewsCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ NewsJql = ' labels = desktop-news ' } })
+Assert-Equal 'news jql trimmed' $jiraNewsCfg.NewsJql 'labels = desktop-news'
 $exampleConfig = Get-EffectiveDesktopConfig $example
 Assert-Equal 'example stays disabled' $exampleConfig.Enabled $false
 Assert-Equal 'example follows policy' $exampleConfig.NetworkDesktopPath ''
@@ -355,6 +370,7 @@ $widgetCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{
 })
 Assert-Equal 'bad portal dropped' $widgetCfg.ServiceDeskUrl ''
 Assert-Equal 'news url kept' $widgetCfg.NewsUrl 'https://intranet.example/news.json'
+Assert-Equal 'news jql empty by default' $widgetCfg.NewsJql ''
 Assert-Equal 'poll floor' $widgetCfg.NewsPollMinutes 1
 Assert-Equal 'corner fallback' $widgetCfg.WidgetCorner 'BottomRight'
 Assert-Equal 'widget can be disabled' $widgetCfg.WidgetEnabled $false

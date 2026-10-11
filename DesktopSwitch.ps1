@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.18'
+$script:Version = '1.2.19'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -813,6 +813,9 @@ try {
             Write-Log ("Ярлыки копируются в {0}, пока общая папка доступна." -f $script:Cfg.LocalDesktopPath)
         } else {
             Write-Log ("Копирование ярлыков выключено. При обрыве стол переключится на готовую папку {0}." -f $script:Cfg.LocalDesktopPath)
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$script:Cfg.NewsJql)) {
+            Write-Log ("Новости читаются из задач Jira: {0}" -f $script:Cfg.NewsJql)
         }
         if ($script:Cfg.WidgetEnabled) {
             Start-WidgetApplication

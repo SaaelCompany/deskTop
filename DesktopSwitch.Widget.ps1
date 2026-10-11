@@ -2846,8 +2846,22 @@ function Show-NewsPopup {
     Set-NewsPopupBounds
 }
 
+function Get-JiraNewsNotices {
+    if ([string]::IsNullOrWhiteSpace([string]$script:Cfg.JiraBaseUrl)) {
+        throw 'Для новостей из Jira заполните JiraBaseUrl.'
+    }
+    $url = Get-JiraNewsSearchUrl -BaseUrl ([string]$script:Cfg.JiraBaseUrl) -Jql ([string]$script:Cfg.NewsJql)
+    if ([string]::IsNullOrWhiteSpace($url)) { throw 'Запрос новостей Jira пуст.' }
+    $result = Invoke-ServiceDeskRequest -Url $url -Method 'GET' -Jira
+    $parsed = $null
+    if (-not [string]::IsNullOrWhiteSpace([string]$result.Body)) { $parsed = $result.Body | ConvertFrom-Json }
+    return @(ConvertFrom-JiraNewsIssues -Page $parsed -BaseUrl ([string]$script:Cfg.JiraBaseUrl))
+}
+
 function Update-WidgetNews {
-    if (-not $script:Cfg -or [string]::IsNullOrWhiteSpace([string]$script:Cfg.NewsUrl)) {
+    $hasNewsUrl = $script:Cfg -and -not [string]::IsNullOrWhiteSpace([string]$script:Cfg.NewsUrl)
+    $hasNewsJql = $script:Cfg -and -not [string]::IsNullOrWhiteSpace([string]$script:Cfg.NewsJql)
+    if (-not $hasNewsUrl -and -not $hasNewsJql) {
         if (-not $script:NewsHintShown) {
             $script:NewsItems = @()
             $script:NewsHintShown = $true
@@ -2862,8 +2876,30 @@ function Update-WidgetNews {
     if (-not $due) { return }
     $script:LastNewsPoll = Get-Date
     try {
-        $text = Receive-HttpText -Url ([string]$script:Cfg.NewsUrl) -TimeoutSec 20
-        $script:NewsItems = @(Sort-Notices (ConvertFrom-NewsFeed $text))
+        $items = New-Object System.Collections.Generic.List[object]
+        $loaded = $false
+        if ($hasNewsUrl) {
+            try {
+                $text = Receive-HttpText -Url ([string]$script:Cfg.NewsUrl) -TimeoutSec 20
+                foreach ($item in @(Sort-Notices (ConvertFrom-NewsFeed $text))) {
+                    if ($null -ne $item) { $items.Add($item) }
+                }
+                $loaded = $true
+            } catch {
+                Write-Log ("Лента NewsUrl не загрузилась: {0}" -f $_.Exception.Message) 'WARN'
+            }
+        }
+        if ($hasNewsJql) {
+            try {
+                foreach ($item in @(Get-JiraNewsNotices)) {
+                    if ($null -ne $item) { $items.Add($item) }
+                }
+                $loaded = $true
+            } catch {
+                Write-Log ("Новости Jira не загрузились: {0}" -f $_.Exception.Message) 'WARN'
+            }
+        }
+        if ($loaded) { $script:NewsItems = @(Sort-Notices $items.ToArray()) }
         $seen = @()
         if ($script:State) { $seen = @($script:State.SeenNoticeIds) }
         $fresh = @(Get-NoticesToShow -Items $script:NewsItems -SeenIds $seen -Max 3)

@@ -417,6 +417,7 @@ function Get-EffectiveDesktopConfig {
         ServiceDeskProjects = $serviceDeskProjects
         JiraBaseUrl = $jiraBaseUrl
         NewsUrl = Select-SingleHttpUrl (Get-Prop $widget 'NewsUrl' '')
+        NewsJql = ([string](Get-Prop $widget 'NewsJql' '')).Trim()
         NewsPollMinutes = Get-ClampedMinutes (ConvertTo-Int (Get-Prop $widget 'NewsPollMinutes' 10) 10)
     }
 }
@@ -1124,6 +1125,49 @@ function Get-JiraApiRoot {
     param([string]$BaseUrl)
     if ([string]::IsNullOrWhiteSpace($BaseUrl)) { return '' }
     return $BaseUrl.Trim().TrimEnd('/')
+}
+
+function Get-JiraNewsSearchUrl {
+    param([string]$BaseUrl, [string]$Jql)
+    $root = Get-JiraApiRoot $BaseUrl
+    $query = ''
+    if ($null -ne $Jql) { $query = $Jql.Trim() }
+    if ([string]::IsNullOrWhiteSpace($root) -or [string]::IsNullOrWhiteSpace($query)) { return '' }
+    $encoded = [Uri]::EscapeDataString($query)
+    return ('{0}/rest/api/2/search?jql={1}&maxResults=10&fields=summary,description,updated,labels,issuetype' -f $root, $encoded)
+}
+
+function ConvertFrom-JiraNewsIssues {
+    param($Page, [string]$BaseUrl)
+    $items = New-Object System.Collections.Generic.List[object]
+    $issues = Get-Prop $Page 'issues' $null
+    $root = Get-JiraApiRoot $BaseUrl
+    foreach ($issue in @($issues)) {
+        if ($null -eq $issue) { continue }
+        $key = ([string](Get-Prop $issue 'key' '')).Trim()
+        if ([string]::IsNullOrWhiteSpace($key)) { continue }
+        $fields = Get-Prop $issue 'fields' $null
+        $summary = ([string](Get-Prop $fields 'summary' '')).Trim()
+        $description = ''
+        if ($null -ne $fields) {
+            $descProp = $fields.PSObject.Properties['description']
+            if ($null -ne $descProp -and $descProp.Value -is [string]) { $description = $descProp.Value }
+        }
+        if ($description.Length -gt 1000) { $description = $description.Substring(0, 1000) }
+        $updated = [string](Get-Prop $fields 'updated' '')
+        $kindParts = New-Object System.Collections.Generic.List[string]
+        foreach ($label in @(Get-Prop $fields 'labels' $null)) {
+            $name = ([string]$label).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($name)) { $kindParts.Add($name) }
+        }
+        $issueType = Get-Prop $fields 'issuetype' $null
+        $typeName = ([string](Get-Prop $issueType 'name' '')).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($typeName)) { $kindParts.Add($typeName) }
+        $url = ''
+        if (-not [string]::IsNullOrWhiteSpace($root)) { $url = $root + '/browse/' + $key }
+        $items.Add((New-Notice -Id $key -Title $summary -Body $description -Kind ($kindParts -join ' ') -Url $url -PublishedAt $updated))
+    }
+    return $items.ToArray()
 }
 
 function Get-JiraServiceDeskUrl {
