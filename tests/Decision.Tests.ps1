@@ -266,6 +266,9 @@ $jiraNewsNone = @(ConvertFrom-JiraNewsIssues -Page ('{"issues":[]}' | ConvertFro
 Assert-Equal 'jira news none' $jiraNewsNone.Count 0
 $jiraNewsCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ NewsJql = ' labels = desktop-news ' } })
 Assert-Equal 'news jql trimmed' $jiraNewsCfg.NewsJql 'labels = desktop-news'
+Assert-Equal 'news token wins' (Resolve-NewsRequestToken ' news-pat ' 'ticket-pat') 'news-pat'
+Assert-Equal 'news token falls back' (Resolve-NewsRequestToken '' 'ticket-pat') 'ticket-pat'
+Assert-Equal 'news token blank' (Resolve-NewsRequestToken '  ' '') ''
 $exampleConfig = Get-EffectiveDesktopConfig $example
 Assert-Equal 'example stays disabled' $exampleConfig.Enabled $false
 Assert-Equal 'example follows policy' $exampleConfig.NetworkDesktopPath ''
@@ -371,6 +374,7 @@ $widgetCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{
 Assert-Equal 'bad portal dropped' $widgetCfg.ServiceDeskUrl ''
 Assert-Equal 'news url kept' $widgetCfg.NewsUrl 'https://intranet.example/news.json'
 Assert-Equal 'news jql empty by default' $widgetCfg.NewsJql ''
+Assert-Equal 'news token empty by default' $widgetCfg.NewsToken ''
 Assert-Equal 'poll floor' $widgetCfg.NewsPollMinutes 1
 Assert-Equal 'corner fallback' $widgetCfg.WidgetCorner 'BottomRight'
 Assert-Equal 'widget can be disabled' $widgetCfg.WidgetEnabled $false

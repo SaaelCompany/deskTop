@@ -13,6 +13,10 @@ $script:LastNewsPoll = [datetime]::MinValue
 $script:NewsHintShown = $false
 $script:NewsSignature = $null
 $script:OpenedNoticeIds = @{}
+$script:ReadNoticeIds = @{}
+$script:NewsPinnedIds = @{}
+$script:NewsReading = $false
+$script:ReadNoticesImported = $false
 $script:AllowExit = $false
 $script:PanelOpen = $false
 $script:PanelHiding = $false
@@ -808,7 +812,8 @@ function Format-NoticeStamp {
     $parsed = [datetime]::TryParse($Value, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$when)
     if (-not $parsed) { $parsed = [datetime]::TryParse($Value, [ref]$when) }
     if (-not $parsed) { return '' }
-    return $when.ToString('dd.MM HH:mm')
+    $months = @('января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря')
+    return ('{0} {1}, {2:HH:mm}' -f $when.Day, $months[$when.Month - 1], $when)
 }
 
 function Get-NoticeSnippet {
@@ -825,10 +830,36 @@ function Get-NewsSignature {
         if ($null -eq $item) { continue }
         $parts.Add(([string]$item.Id) + '|' + ([string]$item.Kind) + '|' + ([string]$item.Title))
     }
+    $pin = New-Object System.Collections.Generic.List[string]
+    foreach ($key in @($script:NewsPinnedIds.Keys)) { $pin.Add([string]$key) }
+    $parts.Add('pin=' + (($pin.ToArray() | Sort-Object) -join ','))
     return [string]::Join("`n", $parts.ToArray())
 }
 
+function Import-ReadNoticeIds {
+    if ($script:ReadNoticesImported) { return }
+    $script:ReadNoticesImported = $true
+    if (-not $script:State) { return }
+    foreach ($id in @(ConvertTo-IdList $script:State.ReadNoticeIds)) {
+        $script:ReadNoticeIds[$id] = $true
+        $script:OpenedNoticeIds[$id] = $true
+    }
+}
+
+function Save-ReadNoticeIds {
+    if (-not $script:State) { return }
+    $ids = New-Object System.Collections.Generic.List[string]
+    foreach ($key in @($script:ReadNoticeIds.Keys)) {
+        $text = [string]$key
+        if (-not [string]::IsNullOrWhiteSpace($text)) { $ids.Add($text) }
+    }
+    if ($ids.Count -gt 200) { $ids = $ids.GetRange($ids.Count - 200, 200) }
+    $script:State.ReadNoticeIds = $ids.ToArray()
+    Save-StateTable $script:State
+}
+
 function Get-UnopenedNoticeCount {
+    Import-ReadNoticeIds
     $count = 0
     foreach ($item in @($script:NewsItems)) {
         if ($null -eq $item) { continue }
@@ -841,12 +872,54 @@ function Get-UnopenedNoticeCount {
 }
 
 function Mark-NoticesOpened {
+    Import-ReadNoticeIds
+    $changed = $false
     foreach ($item in @($script:NewsItems)) {
         if ($null -eq $item) { continue }
         $id = [string]$item.Id
         if ([string]::IsNullOrWhiteSpace($id)) { continue }
         $script:OpenedNoticeIds[$id] = $true
+        if (-not $script:ReadNoticeIds.ContainsKey($id)) {
+            $script:ReadNoticeIds[$id] = $true
+            $changed = $true
+        }
     }
+    if ($changed) { Save-ReadNoticeIds }
+}
+
+function Test-NoticeLinkEnabled {
+    param([string]$Url)
+    if ([string]::IsNullOrWhiteSpace($Url)) { return $false }
+    if ($script:Cfg -and -not [string]::IsNullOrWhiteSpace([string]$script:Cfg.NewsToken)) {
+        $root = Get-JiraApiRoot ([string]$script:Cfg.JiraBaseUrl)
+        if (-not [string]::IsNullOrWhiteSpace($root) -and $Url.StartsWith($root)) { return $false }
+    }
+    return $true
+}
+
+function Enter-NewsReading {
+    if ($script:NewsReading) { return }
+    $script:NewsReading = $true
+    Import-ReadNoticeIds
+    $script:NewsPinnedIds = @{}
+    foreach ($item in @($script:NewsItems)) {
+        if ($null -eq $item) { continue }
+        $id = [string]$item.Id
+        if ([string]::IsNullOrWhiteSpace($id)) { continue }
+        if (-not $script:ReadNoticeIds.ContainsKey($id)) { $script:NewsPinnedIds[$id] = $true }
+    }
+    Mark-NoticesOpened
+    $script:NewsSignature = $null
+    Update-NewsRows
+    Update-LauncherSurface
+}
+
+function Leave-NewsReading {
+    $script:NewsReading = $false
+    if ($script:NewsPinnedIds.Count -eq 0) { return }
+    $script:NewsPinnedIds = @{}
+    $script:NewsSignature = $null
+    Update-NewsRows
 }
 
 function Set-SupportBounds {
@@ -1407,10 +1480,29 @@ function Update-NewsRows {
     if ($null -eq $script:WidgetUi) { return }
     $list = $script:WidgetUi.NewsList
     Clear-ChildControls $list
-    $items = @($script:NewsItems | Where-Object { $null -ne $_ })
+    Import-ReadNoticeIds
+    $visible = New-Object System.Collections.Generic.List[object]
+    foreach ($candidate in @($script:NewsItems)) {
+        if ($null -eq $candidate) { continue }
+        $candidateId = [string]$candidate.Id
+        $pinned = $false
+        $read = $false
+        if (-not [string]::IsNullOrWhiteSpace($candidateId)) {
+            if ($script:NewsPinnedIds.ContainsKey($candidateId)) { $pinned = $true }
+            if ($script:ReadNoticeIds.ContainsKey($candidateId)) { $read = $true }
+        }
+        if ($read -and -not $pinned) { continue }
+        $visible.Add($candidate)
+    }
+    $items = @($visible.ToArray())
+    $hadAny = $false
+    foreach ($candidate in @($script:NewsItems)) {
+        if ($null -ne $candidate) { $hadAny = $true }
+    }
     if ($items.Count -eq 0) {
         $empty = New-Object System.Windows.Forms.Label
-        $empty.Text = 'Пока нет сообщений'
+        if ($hadAny) { $empty.Text = 'Новых сообщений нет' }
+        else { $empty.Text = 'Пока нет сообщений' }
         $empty.TextAlign = 'MiddleCenter'
         $empty.Font = $script:TabFontBold
         $empty.ForeColor = Get-ThemeColor Empty
@@ -1418,7 +1510,8 @@ function Update-NewsRows {
         $emptyWidth = [int]$script:SupportPanelWidth - 32
         $empty.SetBounds(16, 48, $emptyWidth, 24)
         $hint = New-Object System.Windows.Forms.Label
-        $hint.Text = 'Здесь будут новости и технические работы.'
+        if ($hadAny) { $hint.Text = 'Прочитанные сообщения скрыты.' }
+        else { $hint.Text = 'Здесь будут новости и технические работы.' }
         $hint.TextAlign = 'MiddleCenter'
         $hint.Font = $script:TabFont
         $hint.ForeColor = Get-ThemeColor Muted
@@ -1428,73 +1521,66 @@ function Update-NewsRows {
         $list.Controls.Add($hint)
         return
     }
-    $y = 4
+    $y = 12
     $rowWidth = [int]$script:SupportPanelWidth - 32
+    $rowHeight = 84
     foreach ($item in $items) {
         $url = [string]$item.Url
+        $opens = Test-NoticeLinkEnabled $url
         $row = New-Object System.Windows.Forms.Panel
-        $row.SetBounds(16, $y, $rowWidth, 64)
-        $row.BackColor = Get-ThemeColor Canvas
+        $row.SetBounds(16, $y, $rowWidth, $rowHeight)
+        $row.BackColor = Get-ThemeColor FieldFill
         $row.Tag = $url
         $rowColor = $row.BackColor
-        $dot = New-Object System.Windows.Forms.Panel
-        $dot.SetBounds(4, 16, 6, 6)
-        $dotColor = Get-ThemeColor Ink
-        if ([string]$item.Kind -eq 'maintenance') { $dotColor = Get-ThemeColor Maintenance }
-        $dot.BackColor = $dotColor
-        $dotPath = New-Object System.Drawing.Drawing2D.GraphicsPath
-        $dotPath.AddEllipse(0, 0, 6, 6)
-        $dot.Region = New-Object System.Drawing.Region($dotPath)
-        $dot.Tag = $url
+        $bar = New-Object System.Windows.Forms.Panel
+        $bar.SetBounds(0, 0, 3, $rowHeight)
+        if ([string]$item.Kind -eq 'maintenance') { $bar.BackColor = Get-ThemeColor Maintenance }
+        else { $bar.BackColor = Get-ThemeColor Accent }
         $title = New-Object System.Windows.Forms.Label
         $title.Text = [string]$item.Title
         $title.Font = $script:RowTitleFont
         $title.ForeColor = Get-ThemeColor Ink
         $title.BackColor = $rowColor
         $title.AutoEllipsis = $true
-        $title.SetBounds(18, 4, ($rowWidth - 128), 18)
+        $title.SetBounds(16, 10, ($rowWidth - 28), 20)
         $title.Tag = $url
+        $body = New-Object System.Windows.Forms.Label
+        $body.Text = Get-NoticeSnippet ([string]$item.Body)
+        $body.Font = $script:RowBodyFont
+        $body.ForeColor = Get-ThemeColor Detail
+        $body.BackColor = $rowColor
+        $body.AutoEllipsis = $true
+        $body.SetBounds(16, 32, ($rowWidth - 28), 18)
+        $body.Tag = $url
         $when = New-Object System.Windows.Forms.Label
         $when.Text = Format-NoticeStamp ([string]$item.PublishedAt)
         $when.Font = $script:RowBodyFont
         $when.ForeColor = Get-ThemeColor Muted
         $when.BackColor = $rowColor
-        $when.TextAlign = 'MiddleRight'
-        $when.SetBounds(($rowWidth - 100), 4, 92, 18)
+        $when.AutoEllipsis = $true
+        $when.SetBounds(16, 54, ($rowWidth - 28), 18)
         $when.Tag = $url
-        $body = New-Object System.Windows.Forms.Label
-        $body.Text = Get-NoticeSnippet ([string]$item.Body)
-        $body.Font = $script:RowBodyFont
-        $body.ForeColor = Get-ThemeColor Muted
-        $body.BackColor = $rowColor
-        $body.SetBounds(18, 24, ($rowWidth - 28), 32)
-        $rule = New-Object System.Windows.Forms.Panel
-        $rule.SetBounds(0, 63, $rowWidth, 1)
-        $rule.BackColor = Get-ThemeColor Rule
-        $body.Tag = $url
-        $targetUrl = $url
-        $openNotice = {
-            if (-not [string]::IsNullOrWhiteSpace($targetUrl)) { Start-Process $targetUrl }
-        }.GetNewClosure()
-        $row.Add_Click($openNotice)
-        $dot.Add_Click($openNotice)
-        $title.Add_Click($openNotice)
-        $when.Add_Click($openNotice)
-        $body.Add_Click($openNotice)
-        if (-not [string]::IsNullOrWhiteSpace($url)) {
+        if ($opens) {
+            $targetUrl = $url
+            $openNotice = {
+                if (-not [string]::IsNullOrWhiteSpace($targetUrl)) { Start-Process $targetUrl }
+            }.GetNewClosure()
             $hand = [System.Windows.Forms.Cursors]::Hand
             $row.Cursor = $hand
             $title.Cursor = $hand
-            $when.Cursor = $hand
             $body.Cursor = $hand
+            $when.Cursor = $hand
+            $row.Add_Click($openNotice)
+            $title.Add_Click($openNotice)
+            $body.Add_Click($openNotice)
+            $when.Add_Click($openNotice)
         }
-        $row.Controls.Add($rule)
-        $row.Controls.Add($dot)
+        $row.Controls.Add($bar)
         $row.Controls.Add($title)
-        $row.Controls.Add($when)
         $row.Controls.Add($body)
+        $row.Controls.Add($when)
         $list.Controls.Add($row)
-        $y += 68
+        $y += ($rowHeight + 10)
         if ($y -gt 2400) { break }
     }
     $list.AutoScrollMinSize = New-Object System.Drawing.Size(0, $y)
@@ -1677,10 +1763,8 @@ function Update-SupportTabLine {
 function Select-SupportPage {
     param([string]$Page)
     Apply-SupportPageVisual -Page $Page
-    if ($script:PanelOpen -and $script:WidgetPage -eq 'News') {
-        Mark-NoticesOpened
-    }
-    Update-LauncherSurface
+    if ($script:WidgetPage -eq 'News') { Enter-NewsReading }
+    else { Leave-NewsReading }
 }
 
 function Update-WidgetChrome {
@@ -1697,9 +1781,7 @@ function Update-WidgetChrome {
     $ui.Identity.Visible = $false
     $ui.LoginBox.Text = $login
     $ui.ComputerBox.Text = $computer
-    $count = @($script:NewsItems | Where-Object { $null -ne $_ }).Count
-    if ($count -gt 0) { $ui.NewsTab.Text = ('Новости  {0}' -f $count) }
-    else { $ui.NewsTab.Text = 'Новости' }
+    $ui.NewsTab.Text = 'Новости'
     $signature = Get-NewsSignature
     if ($null -eq $script:NewsSignature -or $signature -ne $script:NewsSignature) {
         Update-NewsRows
@@ -1719,6 +1801,7 @@ function Hide-SupportPanel {
     $script:PanelHiding = $true
     try {
         $script:PanelOpen = $false
+        Leave-NewsReading
         if ($script:PanelForm -and -not $script:PanelForm.IsDisposed -and $script:PanelForm.Visible) {
             $script:PanelForm.Hide()
         }
@@ -1738,7 +1821,8 @@ function Show-SupportPanel {
     $script:PanelOpen = $true
     Set-SupportBounds
     Apply-SupportPageVisual -Page $Page
-    if ($script:WidgetPage -eq 'News') { Mark-NoticesOpened }
+    if ($script:WidgetPage -eq 'News') { Enter-NewsReading }
+    else { Leave-NewsReading }
     if (-not $script:PanelForm.Visible) { $script:PanelForm.Show() }
     try { $script:PanelForm.Activate() } catch { }
     Update-LauncherSurface
@@ -2852,7 +2936,8 @@ function Get-JiraNewsNotices {
     }
     $url = Get-JiraNewsSearchUrl -BaseUrl ([string]$script:Cfg.JiraBaseUrl) -Jql ([string]$script:Cfg.NewsJql)
     if ([string]::IsNullOrWhiteSpace($url)) { throw 'Запрос новостей Jira пуст.' }
-    $result = Invoke-ServiceDeskRequest -Url $url -Method 'GET' -Jira
+    $newsToken = Resolve-NewsRequestToken -NewsToken ([string]$script:Cfg.NewsToken) -ServiceDeskToken ([string]$script:Cfg.ServiceDeskToken)
+    $result = Invoke-ServiceDeskRequest -Url $url -Method 'GET' -Jira -Token $newsToken
     $parsed = $null
     if (-not [string]::IsNullOrWhiteSpace([string]$result.Body)) { $parsed = $result.Body | ConvertFrom-Json }
     return @(ConvertFrom-JiraNewsIssues -Page $parsed -BaseUrl ([string]$script:Cfg.JiraBaseUrl))
@@ -2899,7 +2984,18 @@ function Update-WidgetNews {
                 Write-Log ("Новости Jira не загрузились: {0}" -f $_.Exception.Message) 'WARN'
             }
         }
-        if ($loaded) { $script:NewsItems = @(Sort-Notices $items.ToArray()) }
+        if ($loaded) {
+            $script:NewsItems = @(Sort-Notices $items.ToArray())
+            if ($script:NewsReading) {
+                foreach ($item in @($script:NewsItems)) {
+                    if ($null -eq $item) { continue }
+                    $id = [string]$item.Id
+                    if ([string]::IsNullOrWhiteSpace($id)) { continue }
+                    if (-not $script:ReadNoticeIds.ContainsKey($id)) { $script:NewsPinnedIds[$id] = $true }
+                }
+                Mark-NoticesOpened
+            }
+        }
         $seen = @()
         if ($script:State) { $seen = @($script:State.SeenNoticeIds) }
         $fresh = @(Get-NoticesToShow -Items $script:NewsItems -SeenIds $seen -Max 3)
@@ -2936,6 +3032,7 @@ function Invoke-ServiceDeskRequest {
         [string]$Url,
         [string]$Method,
         [string]$JsonBody,
+        [string]$Token,
         [switch]$Jira
     )
     if ([string]::IsNullOrWhiteSpace($Url)) { throw 'Адрес запроса не задан.' }
@@ -2953,8 +3050,8 @@ function Invoke-ServiceDeskRequest {
         $proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
         $request.Proxy = $proxy
         if ($Jira) { $request.Headers.Add('X-ExperimentalApi', 'opt-in') }
-        $token = ''
-        if ($script:Cfg) { $token = [string]$script:Cfg.ServiceDeskToken }
+        $token = [string]$Token
+        if ([string]::IsNullOrWhiteSpace($token) -and $script:Cfg) { $token = [string]$script:Cfg.ServiceDeskToken }
         if (-not [string]::IsNullOrWhiteSpace($token)) {
             $request.Headers.Add('Authorization', 'Bearer ' + $token)
         } else {

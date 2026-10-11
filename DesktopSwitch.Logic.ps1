@@ -418,6 +418,7 @@ function Get-EffectiveDesktopConfig {
         JiraBaseUrl = $jiraBaseUrl
         NewsUrl = Select-SingleHttpUrl (Get-Prop $widget 'NewsUrl' '')
         NewsJql = ([string](Get-Prop $widget 'NewsJql' '')).Trim()
+        NewsToken = ([string](Get-Prop $widget 'NewsToken' '')).Trim()
         NewsPollMinutes = Get-ClampedMinutes (ConvertTo-Int (Get-Prop $widget 'NewsPollMinutes' 10) 10)
     }
 }
@@ -1125,6 +1126,13 @@ function Get-JiraApiRoot {
     param([string]$BaseUrl)
     if ([string]::IsNullOrWhiteSpace($BaseUrl)) { return '' }
     return $BaseUrl.Trim().TrimEnd('/')
+}
+
+function Resolve-NewsRequestToken {
+    param([string]$NewsToken, [string]$ServiceDeskToken)
+    if (-not [string]::IsNullOrWhiteSpace($NewsToken)) { return $NewsToken.Trim() }
+    if ([string]::IsNullOrWhiteSpace($ServiceDeskToken)) { return '' }
+    return $ServiceDeskToken.Trim()
 }
 
 function Get-JiraNewsSearchUrl {
