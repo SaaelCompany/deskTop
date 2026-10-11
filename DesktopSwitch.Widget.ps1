@@ -58,6 +58,7 @@ $script:SendHot = $false
 $script:CloseHot = $false
 $script:DeskLayerFailed = $false
 $script:IconMissLogged = $false
+$script:LauncherColorLogged = $false
 $script:ConfigFile = $null
 
 $script:DesktopHostSource = @'
@@ -292,10 +293,16 @@ public static class DeskLayer {
                     using (Image image = Image.FromStream(stream)) {
                         g.SetClip(new Rectangle(0, 0, size, size));
                         using (GraphicsPath clip = new GraphicsPath()) {
-                            clip.AddEllipse(6, 6, 40, 40);
+                            clip.AddEllipse(1, 1, 50, 50);
                             g.SetClip(clip);
                         }
-                        g.DrawImage(image, new Rectangle(8, 8, 36, 36));
+                        float fade = ((fillArgb >> 24) & 255) / 255f;
+                        using (ImageAttributes attr = new ImageAttributes()) {
+                            ColorMatrix matrix = new ColorMatrix();
+                            matrix.Matrix33 = fade;
+                            attr.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+                            g.DrawImage(image, new Rectangle(6, 6, 40, 40), 0, 0, image.Width, image.Height, GraphicsUnit.Pixel, attr);
+                        }
                         g.ResetClip();
                         drewIcon = true;
                     }
@@ -412,6 +419,14 @@ function Update-LauncherSurface {
     if (-not $form.IsHandleCreated) { return }
     $color = Get-LauncherFill
     if ($script:LauncherHot) { $color = Get-LauncherFill -Hover }
+    if (-not $script:LauncherColorLogged -and $script:Cfg) {
+        $script:LauncherColorLogged = $true
+        $shown = [string]$script:Cfg.WidgetColor
+        $opaque = 100
+        if ($script:Cfg.PSObject.Properties['WidgetOpacity']) { $opaque = [int]$script:Cfg.WidgetOpacity }
+        if ([string]::IsNullOrWhiteSpace($shown)) { $shown = '#2F6BFF' }
+        Write-Log ("Кнопка: цвет {0}, непрозрачность {1}%." -f $shown, $opaque)
+    }
     $icon = ''
     if ($script:Cfg -and -not [string]::IsNullOrWhiteSpace([string]$script:Cfg.WidgetIcon)) {
         $icon = Resolve-WidgetIconPath ([string]$script:Cfg.WidgetIcon)
@@ -476,23 +491,35 @@ function Get-ThemeColor {
 
 function Get-LauncherFill {
     param([switch]$Hover)
-    $color = Get-ThemeColor Accent
+    $red = 47
+    $green = 107
+    $blue = 255
+    $accent = Get-ThemeColor Accent
+    $red = [int]$accent.R
+    $green = [int]$accent.G
+    $blue = [int]$accent.B
     $hex = ''
     if ($script:Cfg -and $script:Cfg.PSObject.Properties['WidgetColor']) {
         $hex = [string]$script:Cfg.WidgetColor
     }
     if ($hex.Length -eq 7 -and $hex.StartsWith('#')) {
-        $number = 0
-        $parsed = [int]::TryParse($hex.Substring(1), [System.Globalization.NumberStyles]::HexNumber, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$number)
-        if ($parsed) {
-            $color = [System.Drawing.Color]::FromArgb((($number -shr 16) -band 255), (($number -shr 8) -band 255), ($number -band 255))
-        }
+        $red = [Convert]::ToInt32($hex.Substring(1, 2), 16)
+        $green = [Convert]::ToInt32($hex.Substring(3, 2), 16)
+        $blue = [Convert]::ToInt32($hex.Substring(5, 2), 16)
     }
-    if (-not $Hover) { return $color }
-    $red = [int][Math]::Round($color.R * 0.82)
-    $green = [int][Math]::Round($color.G * 0.82)
-    $blue = [int][Math]::Round($color.B * 0.82)
-    return [System.Drawing.Color]::FromArgb($red, $green, $blue)
+    $opacity = 100
+    if ($script:Cfg -and $script:Cfg.PSObject.Properties['WidgetOpacity']) {
+        $opacity = [int]$script:Cfg.WidgetOpacity
+    }
+    if ($opacity -lt 0) { $opacity = 0 }
+    if ($opacity -gt 100) { $opacity = 100 }
+    $alpha = [int][Math]::Round(255.0 * $opacity / 100.0)
+    if ($Hover) {
+        $red = [int][Math]::Round($red * 0.82)
+        $green = [int][Math]::Round($green * 0.82)
+        $blue = [int][Math]::Round($blue * 0.82)
+    }
+    return [System.Drawing.Color]::FromArgb($alpha, $red, $green, $blue)
 }
 
 function Test-StayOnTop {

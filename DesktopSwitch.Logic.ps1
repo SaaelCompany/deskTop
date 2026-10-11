@@ -45,17 +45,65 @@ function Resolve-StayOnTop {
 
 function ConvertTo-WidgetColor {
     param([string]$Text)
+    $clean = Get-WidgetColorHex $Text
+    if ([string]::IsNullOrWhiteSpace($clean)) { return '' }
+    return ('#{0}' -f $clean.Substring(0, 6))
+}
+
+function Get-WidgetColorHex {
+    param([string]$Text)
     if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
     $clean = $Text.Trim()
     if ($clean.StartsWith('#')) { $clean = $clean.Substring(1) }
-    if ($clean.Length -eq 3) {
-        $clean = ('' + $clean[0] + $clean[0] + $clean[1] + $clean[1] + $clean[2] + $clean[2])
+    if ($clean.Length -eq 3 -or $clean.Length -eq 4) {
+        $expanded = ''
+        foreach ($char in $clean.ToCharArray()) { $expanded += ('' + $char + $char) }
+        $clean = $expanded
     }
-    if ($clean.Length -ne 6) { return '' }
-    $number = 0
-    $parsed = [int]::TryParse($clean, [System.Globalization.NumberStyles]::HexNumber, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$number)
-    if (-not $parsed) { return '' }
-    return ('#{0}' -f $clean.ToUpperInvariant())
+    if ($clean.Length -ne 6 -and $clean.Length -ne 8) { return '' }
+    $index = 0
+    while ($index -lt $clean.Length) {
+        $byte = 0
+        $parsed = [int]::TryParse($clean.Substring($index, 2), [System.Globalization.NumberStyles]::HexNumber, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$byte)
+        if (-not $parsed -or $byte -lt 0 -or $byte -gt 255) { return '' }
+        $index += 2
+    }
+    return $clean.ToUpperInvariant()
+}
+
+function Resolve-WidgetOpacity {
+    param($Stored, [string]$ColorText)
+    $fromColor = -1
+    $hex = Get-WidgetColorHex $ColorText
+    if ($hex.Length -eq 8) {
+        $alpha = 0
+        $parsedAlpha = [int]::TryParse($hex.Substring(6, 2), [System.Globalization.NumberStyles]::HexNumber, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$alpha)
+        if ($parsedAlpha) { $fromColor = [int][Math]::Round(100.0 * $alpha / 255.0) }
+    }
+    if ($null -eq $Stored) {
+        if ($fromColor -ge 0) { return $fromColor }
+        return 100
+    }
+    $text = ([string]$Stored).Trim()
+    if ($text.EndsWith('%')) { $text = $text.Substring(0, $text.Length - 1).Trim() }
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        if ($fromColor -ge 0) { return $fromColor }
+        return 100
+    }
+    $number = 0.0
+    $style = [System.Globalization.NumberStyles]::Float
+    $parsed = [double]::TryParse($text, $style, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$number)
+    if (-not $parsed) {
+        $parsed = [double]::TryParse($text, $style, [System.Globalization.CultureInfo]::CurrentCulture, [ref]$number)
+    }
+    if (-not $parsed) {
+        if ($fromColor -ge 0) { return $fromColor }
+        return 100
+    }
+    if ($number -ge 0 -and $number -le 1) { $number = $number * 100 }
+    if ($number -lt 0) { return 0 }
+    if ($number -gt 100) { return 100 }
+    return [int][Math]::Round($number)
 }
 
 function Get-WidgetPalette {
@@ -277,6 +325,7 @@ function Get-EffectiveDesktopConfig {
     $serviceDeskProvider = Resolve-ServiceDeskProvider -Requested ([string](Get-Prop $widget 'ServiceDesk' '')) -JiraBaseUrl $jiraBaseUrl -ApiUrl $serviceDeskApi -PortalUrl $serviceDeskUrl
     $serviceDeskCategories = Get-ServiceDeskCategories $widget
     $serviceDeskProjects = Get-ServiceDeskProjects $widget
+    $widgetColorText = ([string](Get-Prop $widget 'Color' '')).Trim()
 
     return [pscustomobject]@{
         Enabled = ConvertTo-Bool (Get-Prop $Config 'Enabled' $false) $false
@@ -303,7 +352,8 @@ function Get-EffectiveDesktopConfig {
         WidgetEnabled = ConvertTo-Bool (Get-Prop $widget 'Enabled' $true) $true
         WidgetTitle = ([string](Get-Prop $widget 'Title' 'Сервисная служба')).Trim()
         WidgetIcon = ([string](Get-Prop $widget 'Icon' '')).Trim()
-        WidgetColor = ConvertTo-WidgetColor ([string](Get-Prop $widget 'Color' ''))
+        WidgetColor = ConvertTo-WidgetColor $widgetColorText
+        WidgetOpacity = Resolve-WidgetOpacity (Get-Prop $widget 'Opacity' $null) $widgetColorText
         WidgetCorner = $cornerMap[$cornerKey]
         WidgetMargin = Get-ClampedMargin (ConvertTo-Int (Get-Prop $widget 'Margin' 16) 16)
         ServiceDeskUrl = $serviceDeskUrl

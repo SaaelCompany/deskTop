@@ -358,6 +358,14 @@ Assert-Equal 'color empty' (ConvertTo-WidgetColor '') ''
 Assert-Equal 'color hash' (ConvertTo-WidgetColor '#2f6bff') '#2F6BFF'
 Assert-Equal 'color short' (ConvertTo-WidgetColor '1a4') '#11AA44'
 Assert-Equal 'color junk dropped' (ConvertTo-WidgetColor 'синий') ''
+Assert-Equal 'color keeps rgb when alpha set' (ConvertTo-WidgetColor '#1F6B4A80') '#1F6B4A'
+Assert-Equal 'opacity default' (Resolve-WidgetOpacity $null '') 100
+Assert-Equal 'opacity percent' (Resolve-WidgetOpacity 40 '') 40
+Assert-Equal 'opacity fraction' (Resolve-WidgetOpacity 0.4 '') 40
+Assert-Equal 'opacity from color alpha' (Resolve-WidgetOpacity $null '#1F6B4A80') 50
+Assert-Equal 'opacity wins over color alpha' (Resolve-WidgetOpacity 20 '#1F6B4A80') 20
+Assert-Equal 'high color kept' (ConvertTo-WidgetColor '#FF8800CC') '#FF8800'
+Assert-Equal 'high color alpha' (Resolve-WidgetOpacity $null '#FF8800CC') 80
 $lightPalette = Get-WidgetPalette -Light $true
 $darkPalette = Get-WidgetPalette -Light $false
 Assert-Equal 'light card' $lightPalette.Canvas[0] 255
@@ -370,6 +378,10 @@ Assert-Equal 'icon path trimmed' $iconCfg.WidgetIcon 'icons\chat.png'
 $colorCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ Color = ' #0E7A4B ' } })
 Assert-Equal 'button color kept' $colorCfg.WidgetColor '#0E7A4B'
 Assert-Equal 'button color empty by default' $widgetCfg.WidgetColor ''
+Assert-Equal 'button opacity default' $widgetCfg.WidgetOpacity 100
+$fadeCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ Color = '#11223380'; Opacity = 25 } })
+Assert-Equal 'faded button color' $fadeCfg.WidgetColor '#112233'
+Assert-Equal 'faded button opacity' $fadeCfg.WidgetOpacity 25
 Assert-Equal 'jira off by default' $widgetCfg.JiraBaseUrl ''
 Assert-Equal 'desk off without urls' $widgetCfg.ServiceDeskProvider 'None'
 Assert-Equal 'default category count' $widgetCfg.ServiceDeskCategories.Count 3

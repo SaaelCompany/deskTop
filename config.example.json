@@ -29,6 +29,7 @@
     "Title": "Сервисная служба",
     "Icon": "",
     "Color": "",
+    "Opacity": 100,
     "Corner": "BottomRight",
     "Margin": 16,
     "ServiceDesk": "Auto",
