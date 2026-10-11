@@ -269,6 +269,17 @@ Assert-Equal 'news jql trimmed' $jiraNewsCfg.NewsJql 'labels = desktop-news'
 Assert-Equal 'news token wins' (Resolve-NewsRequestToken ' news-pat ' 'ticket-pat') 'news-pat'
 Assert-Equal 'news token falls back' (Resolve-NewsRequestToken '' 'ticket-pat') 'ticket-pat'
 Assert-Equal 'news token blank' (Resolve-NewsRequestToken '  ' '') ''
+$mergedIds = Merge-NoticeIds -Existing @('OPS-1') -More @('OPS-1', 'OPS-2')
+Assert-Equal 'merged notice count' $mergedIds.Count 2
+Assert-Equal 'merged notice second' $mergedIds[1] 'OPS-2'
+$replaySeen = Merge-NoticeIds -Existing @('OPS-1') -More @('OPS-2')
+$replayItems = @(
+    [pscustomobject]@{ Id = 'OPS-1'; Kind = 'news'; Title = 'old'; PublishedAt = '2026-10-11T13:09:00' }
+    [pscustomobject]@{ Id = 'OPS-3'; Kind = 'news'; Title = 'new'; PublishedAt = '2026-10-11T13:20:00' }
+)
+$replay = @(Get-NoticesToShow -Items $replayItems -SeenIds $replaySeen -Max 3)
+Assert-Equal 'restart skips shown news' $replay.Count 1
+Assert-Equal 'restart shows a new key' $replay[0].Id 'OPS-3'
 $exampleConfig = Get-EffectiveDesktopConfig $example
 Assert-Equal 'example stays disabled' $exampleConfig.Enabled $false
 Assert-Equal 'example follows policy' $exampleConfig.NetworkDesktopPath ''

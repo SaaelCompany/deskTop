@@ -840,7 +840,11 @@ function Import-ReadNoticeIds {
     if ($script:ReadNoticesImported) { return }
     $script:ReadNoticesImported = $true
     if (-not $script:State) { return }
-    foreach ($id in @(ConvertTo-IdList $script:State.ReadNoticeIds)) {
+    foreach ($id in (ConvertTo-IdList $script:State.ReadNoticeIds)) {
+        $script:ReadNoticeIds[$id] = $true
+        $script:OpenedNoticeIds[$id] = $true
+    }
+    foreach ($id in (ConvertTo-IdList $script:State.SeenNoticeIds)) {
         $script:ReadNoticeIds[$id] = $true
         $script:OpenedNoticeIds[$id] = $true
     }
@@ -855,6 +859,7 @@ function Save-ReadNoticeIds {
     }
     if ($ids.Count -gt 200) { $ids = $ids.GetRange($ids.Count - 200, 200) }
     $script:State.ReadNoticeIds = $ids.ToArray()
+    $script:State.SeenNoticeIds = Merge-NoticeIds -Existing $script:State.SeenNoticeIds -More $script:State.ReadNoticeIds
     Save-StateTable $script:State
 }
 
@@ -884,13 +889,15 @@ function Mark-NoticesOpened {
             $changed = $true
         }
     }
-    if ($changed) { Save-ReadNoticeIds }
+    if ($changed -and $script:State) {
+        Save-ReadNoticeIds
+    }
 }
 
 function Test-NoticeLinkEnabled {
     param([string]$Url)
     if ([string]::IsNullOrWhiteSpace($Url)) { return $false }
-    if ($script:Cfg -and -not [string]::IsNullOrWhiteSpace([string]$script:Cfg.NewsToken)) {
+    if ($script:Cfg) {
         $root = Get-JiraApiRoot ([string]$script:Cfg.JiraBaseUrl)
         if (-not [string]::IsNullOrWhiteSpace($root) -and $Url.StartsWith($root)) { return $false }
     }
@@ -2997,8 +3004,11 @@ function Update-WidgetNews {
                 Mark-NoticesOpened
             }
         }
+        Import-ReadNoticeIds
         $seen = @()
-        if ($script:State) { $seen = @($script:State.SeenNoticeIds) }
+        if ($script:State) {
+            $seen = Merge-NoticeIds -Existing $script:State.SeenNoticeIds -More $script:State.ReadNoticeIds
+        }
         $fresh = @(Get-NoticesToShow -Items $script:NewsItems -SeenIds $seen -Max 3)
         if ($fresh.Count -gt 0) {
             try {
@@ -3008,13 +3018,19 @@ function Update-WidgetNews {
                 if ($null -ne $balloon) { Show-UserNotice -Message ([string]$balloon.Text) -Title ([string]$balloon.Title) }
                 Write-Log ("Всплывающее окно новостей не открылось: {0}" -f $_.Exception.Message) 'WARN'
             }
-            $ids = ConvertTo-IdList $seen
+            $freshIds = New-Object System.Collections.Generic.List[string]
             foreach ($item in $fresh) {
-                if ($null -ne $item) { $ids.Add([string]$item.Id) }
+                if ($null -eq $item) { continue }
+                $id = [string]$item.Id
+                if ([string]::IsNullOrWhiteSpace($id)) { continue }
+                $freshIds.Add($id)
+                $script:ReadNoticeIds[$id] = $true
+                $script:OpenedNoticeIds[$id] = $true
+                $script:NewsPinnedIds[$id] = $true
             }
-            if ($ids.Count -gt 200) { $ids = $ids.GetRange($ids.Count - 200, 200) }
             if ($script:State) {
-                $script:State.SeenNoticeIds = $ids.ToArray()
+                $script:State.SeenNoticeIds = Merge-NoticeIds -Existing $script:State.SeenNoticeIds -More $freshIds.ToArray()
+                $script:State.ReadNoticeIds = Merge-NoticeIds -Existing $script:State.ReadNoticeIds -More $freshIds.ToArray()
                 Save-StateTable $script:State
             }
         }

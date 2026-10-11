@@ -976,9 +976,8 @@ function Get-NoticesToShow {
     param($Items, $SeenIds, [int]$Max = 3)
     if ($Max -lt 1) { $Max = 1 }
     $seen = @{}
-    foreach ($id in @($SeenIds)) {
-        $text = [string]$id
-        if (-not [string]::IsNullOrWhiteSpace($text)) { $seen[$text] = $true }
+    foreach ($id in (ConvertTo-IdList $SeenIds)) {
+        $seen[$id] = $true
     }
     $fresh = New-Object System.Collections.Generic.List[object]
     foreach ($item in @(Sort-Notices $Items)) {
@@ -1025,6 +1024,26 @@ function ConvertTo-IdList {
         if (-not [string]::IsNullOrWhiteSpace($text)) { $list.Add($text.Trim()) }
     }
     return ,$list
+}
+
+function Merge-NoticeIds {
+    param($Existing, $More)
+    $list = New-Object System.Collections.Generic.List[string]
+    $seen = @{}
+    $first = ConvertTo-IdList $Existing
+    $second = ConvertTo-IdList $More
+    foreach ($id in $first) {
+        if ($seen.ContainsKey($id)) { continue }
+        $seen[$id] = $true
+        $list.Add($id)
+    }
+    foreach ($id in $second) {
+        if ($seen.ContainsKey($id)) { continue }
+        $seen[$id] = $true
+        $list.Add($id)
+    }
+    if ($list.Count -gt 200) { $list = $list.GetRange($list.Count - 200, 200) }
+    return ,$list.ToArray()
 }
 
 function Test-TicketDraft {
