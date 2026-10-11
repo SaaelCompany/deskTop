@@ -278,6 +278,33 @@ public static class DeskLayer {
         return path;
     }
 
+    static void DrawNoticeBadge(Graphics g, int badge, int size) {
+        string text = badge > 9 ? "9+" : badge.ToString();
+        float height = 20f;
+        float width = text.Length > 1 ? 26f : 20f;
+        float left = size - width - 1f;
+        float top = 1f;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        using (SolidBrush shadow = new SolidBrush(Color.FromArgb(80, 0, 0, 0))) {
+            g.FillEllipse(shadow, left + 0.4f, top + 1.6f, width, height);
+        }
+        using (SolidBrush plate = new SolidBrush(Color.FromArgb(255, 23, 26, 33))) {
+            g.FillEllipse(plate, left, top, width, height);
+        }
+        using (Pen ring = new Pen(Color.White, 1.7f)) {
+            g.DrawEllipse(ring, left + 1.15f, top + 1.15f, width - 2.3f, height - 2.3f);
+        }
+        float fontSize = text.Length > 1 ? 10f : 12f;
+        using (Font font = new Font("Segoe UI", fontSize, FontStyle.Bold, GraphicsUnit.Pixel))
+        using (SolidBrush ink = new SolidBrush(Color.White))
+        using (StringFormat format = new StringFormat()) {
+            format.Alignment = StringAlignment.Center;
+            format.LineAlignment = StringAlignment.Center;
+            format.FormatFlags = StringFormatFlags.NoWrap;
+            g.DrawString(text, font, ink, new RectangleF(left, top - 0.4f, width, height), format);
+        }
+    }
+
     public static bool ShowLauncher(IntPtr hwnd, int fillArgb, int x, int y, bool open, int badge, string iconPath) {
         if (hwnd == IntPtr.Zero) return false;
         const int size = 52;
@@ -325,14 +352,7 @@ public static class DeskLayer {
                     }
                 }
             }
-            if (badge > 0) {
-                using (SolidBrush white = new SolidBrush(Color.White)) g.FillEllipse(white, 32, 2, 16, 16);
-                string text = badge > 9 ? "9" : badge.ToString();
-                using (Font font = new Font("Segoe UI", 7f, FontStyle.Bold, GraphicsUnit.Point)) {
-                    TextRenderer.DrawText(g, text, font, new Rectangle(32, 2, 16, 16), fill,
-                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
-                }
-            }
+            if (badge > 0 && !open) DrawNoticeBadge(g, badge, size);
         }
         IntPtr screen = GetDC(IntPtr.Zero);
         IntPtr mem = CreateCompatibleDC(screen);
@@ -436,8 +456,7 @@ function Update-LauncherSurface {
     $layered = $false
     if (Initialize-DeskLayer) {
         try {
-            $badge = 0
-            try { $badge = [int](Get-UnopenedNoticeCount) } catch { $badge = 0 }
+            $badge = Get-LauncherBadgeCount
             $form.Region = $null
             $layered = [bool]([DeskLayer]::ShowLauncher($form.Handle, $color.ToArgb(), $form.Left, $form.Top, [bool]$script:PanelOpen, $badge, $icon))
         } catch {
@@ -861,6 +880,12 @@ function Save-ReadNoticeIds {
     $script:State.ReadNoticeIds = $ids.ToArray()
     $script:State.SeenNoticeIds = Merge-NoticeIds -Existing $script:State.SeenNoticeIds -More $script:State.ReadNoticeIds
     Save-StateTable $script:State
+}
+
+function Get-LauncherBadgeCount {
+    if ($script:PanelOpen) { return 0 }
+    if ($script:NewsPopup -and -not $script:NewsPopup.IsDisposed -and $script:NewsPopup.Visible) { return 0 }
+    try { return [int](Get-UnopenedNoticeCount) } catch { return 0 }
 }
 
 function Get-UnopenedNoticeCount {
@@ -1900,16 +1925,36 @@ function New-LauncherButton {
             }
             $pen.Dispose()
         }
-        $count = Get-UnopenedNoticeCount
+        $count = Get-LauncherBadgeCount
         if ($count -gt 0) {
-            $badge = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
-            $g.FillEllipse($badge, 32, 2, 16, 16)
-            $badge.Dispose()
             $text = [string]$count
-            if ($count -gt 9) { $text = '9' }
-            $font = New-Object System.Drawing.Font('Segoe UI', 7, [System.Drawing.FontStyle]::Bold)
-            $flags = [System.Windows.Forms.TextFormatFlags]::HorizontalCenter -bor [System.Windows.Forms.TextFormatFlags]::VerticalCenter -bor [System.Windows.Forms.TextFormatFlags]::NoPadding -bor [System.Windows.Forms.TextFormatFlags]::SingleLine
-            [System.Windows.Forms.TextRenderer]::DrawText($g, $text, $font, (New-Object System.Drawing.Rectangle(32, 2, 16, 16)), (Get-LauncherFill), $flags)
+            if ($count -gt 9) { $text = '9+' }
+            $badgeHeight = 20
+            $badgeWidth = 20
+            if ($text.Length -gt 1) { $badgeWidth = 26 }
+            $badgeX = 52 - $badgeWidth - 1
+            $badgeY = 1
+            $shadow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(80, 0, 0, 0))
+            $g.FillEllipse($shadow, ($badgeX + 0.4), ($badgeY + 1.6), $badgeWidth, $badgeHeight)
+            $shadow.Dispose()
+            $plate = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 23, 26, 33))
+            $g.FillEllipse($plate, $badgeX, $badgeY, $badgeWidth, $badgeHeight)
+            $plate.Dispose()
+            $ring = New-Object System.Drawing.Pen ([System.Drawing.Color]::White, 1.7)
+            $g.DrawEllipse($ring, ($badgeX + 1.15), ($badgeY + 1.15), ($badgeWidth - 2.3), ($badgeHeight - 2.3))
+            $ring.Dispose()
+            $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+            $fontPx = 12
+            if ($text.Length -gt 1) { $fontPx = 10 }
+            $font = New-Object System.Drawing.Font('Segoe UI', ([single]$fontPx), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+            $ink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
+            $format = New-Object System.Drawing.StringFormat
+            $format.Alignment = [System.Drawing.StringAlignment]::Center
+            $format.LineAlignment = [System.Drawing.StringAlignment]::Center
+            $box = New-Object System.Drawing.RectangleF(([single]$badgeX), ([single]($badgeY - 0.4)), ([single]$badgeWidth), ([single]$badgeHeight))
+            $g.DrawString($text, $font, $ink, $box, $format)
+            $format.Dispose()
+            $ink.Dispose()
             $font.Dispose()
         }
     })
@@ -2804,6 +2849,7 @@ function Hide-NewsPopup {
     } finally {
         $script:NewsPopupHiding = $false
     }
+    Update-LauncherSurface
 }
 
 function Open-NewsFromPopup {
@@ -2935,6 +2981,7 @@ function Show-NewsPopup {
     Invoke-WindowChrome -Form $script:NewsPopup
     if (-not $script:NewsPopup.Visible) { $script:NewsPopup.Show() }
     Set-NewsPopupBounds
+    Update-LauncherSurface
 }
 
 function Get-JiraNewsNotices {
