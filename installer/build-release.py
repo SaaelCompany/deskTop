@@ -9,8 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = Path(__file__).resolve().parent
-VERSION = "1.2.31"
-PRODUCT_CODE = "{D4F17A82-6E30-4C91-B5A8-1C9E7F2B0D64}"
+VERSION = "1.2.32"
+PRODUCT_CODE = "{B3A91E06-4C72-4E18-8D5F-7A2C9B1E6D40}"
 UPGRADE_CODE = "{4048E9C4-7965-48DC-A23D-A4554966E57F}"
 
 
@@ -182,6 +182,7 @@ def main():
         "-resource:" + str(stage / "DesktopSwitch.ps1") + ",DesktopSwitch.ps1",
         "-resource:" + str(stage / "DesktopSwitch.Logic.ps1") + ",DesktopSwitch.Logic.ps1",
         "-resource:" + str(stage / "DesktopSwitch.Widget.ps1") + ",DesktopSwitch.Widget.ps1",
+        "-resource:" + str(ROOT / "config.example.json") + ",config.example.json",
         "-out:" + str(exe),
         str(INSTALLER / "DesktopSwitch.cs"),
     ])

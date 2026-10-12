@@ -291,6 +291,7 @@ $expiredLog = Merge-NoticeLog -Existing $keptLog -Incoming @() -Now $noticeNow.A
 Assert-Equal 'day log expires' $expiredLog.Count 0
 $exampleConfig = Get-EffectiveDesktopConfig $example
 Assert-Equal 'example stays disabled' $exampleConfig.Enabled $false
+Assert-Equal 'example preview off' $exampleConfig.Preview $false
 Assert-Equal 'example follows policy' $exampleConfig.NetworkDesktopPath ''
 Assert-Equal 'example widget on' $exampleConfig.WidgetEnabled $true
 Assert-Equal 'example emergency folder empty' $exampleConfig.EmergencyFolder ''

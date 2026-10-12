@@ -12,8 +12,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("DesktopSwitch")]
 [assembly: AssemblyProduct("DesktopSwitch")]
 [assembly: AssemblyCompany("SaaelCompany")]
-[assembly: AssemblyVersion("1.2.31.0")]
-[assembly: AssemblyFileVersion("1.2.31.0")]
+[assembly: AssemblyVersion("1.2.32.0")]
+[assembly: AssemblyFileVersion("1.2.32.0")]
 
 internal static class DesktopSwitchHost {
     const string Title = "\u0421\u0435\u0440\u0432\u0438\u0441\u043d\u0430\u044f \u0441\u043b\u0443\u0436\u0431\u0430";
@@ -68,7 +68,7 @@ internal static class DesktopSwitchHost {
                 script = PrepareScript(dir);
             } catch (Exception ex) {
                 Note(ex.ToString());
-                Fail("\u0420\u044f\u0434\u043e\u043c \u0441 DesktopSwitch.exe \u043d\u0435\u0442 \u0444\u0430\u0439\u043b\u043e\u0432 \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u044b. \u0420\u0430\u0441\u043f\u0430\u043a\u0443\u0439\u0442\u0435 \u0430\u0440\u0445\u0438\u0432 \u0446\u0435\u043b\u0438\u043a\u043e\u043c \u0438\u043b\u0438 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0435 DesktopSwitch.msi.");
+                Fail("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u0434\u0433\u043e\u0442\u043e\u0432\u0438\u0442\u044c \u0444\u0430\u0439\u043b\u044b \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u044b.\r\n\r\n" + ex.Message);
                 return 1;
             }
             if (help) {
@@ -162,7 +162,7 @@ internal static class DesktopSwitchHost {
 
     static string Usage(string script) {
         var text = new StringBuilder();
-        text.AppendLine("DesktopSwitch 1.2.31");
+        text.AppendLine("DesktopSwitch 1.2.32");
         text.AppendLine(script);
         text.AppendLine("DesktopSwitch.exe");
         text.AppendLine("DesktopSwitch.exe -Status");
@@ -182,6 +182,7 @@ internal static class DesktopSwitchHost {
         if (ScriptsReady(exeDir)) {
             if (CanWrite(exeDir)) {
                 try { RefreshScripts(exeDir); } catch (Exception ex) { Note("script refresh skipped: " + ex.Message); }
+                try { EnsureConfig(exeDir); } catch (Exception ex) { Note("config write skipped: " + ex.Message); }
             }
             return Path.Combine(exeDir, "DesktopSwitch.ps1");
         }
@@ -190,12 +191,75 @@ internal static class DesktopSwitchHost {
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DesktopSwitch", "app");
         Directory.CreateDirectory(dest);
         RefreshScripts(dest);
-        string config = Path.Combine(dest, "config.json");
-        if (!File.Exists(config)) {
-            File.WriteAllText(config, "{\r\n  \"Enabled\": true,\r\n  \"Preview\": true,\r\n  \"NetworkDesktopPath\": \"\"\r\n}\r\n", new UTF8Encoding(true));
-        }
+        EnsureConfig(dest);
         Note("extracted scripts to " + dest);
         return Path.Combine(dest, "DesktopSwitch.ps1");
+    }
+
+    static void EnsureConfig(string directory) {
+        string path = Path.Combine(directory, "config.json");
+        string previousNetwork = "";
+        if (File.Exists(path)) {
+            string existing = File.ReadAllText(path);
+            if (!IsShortConfig(existing)) return;
+            previousNetwork = JsonString(existing, "NetworkDesktopPath");
+            Note("short config.json will be replaced with the full template");
+        }
+        string text = ReadResource("config.example.json");
+        text = text.Replace("\r\n", "\n").Replace("\r", "\n");
+        text = ReplaceFirst(text, "\"Enabled\": false", "\"Enabled\": true");
+        if (previousNetwork.StartsWith("\\\\", StringComparison.Ordinal)) {
+            text = ReplaceFirst(text, "\"NetworkDesktopPath\": \"\"", "\"NetworkDesktopPath\": \"" + previousNetwork + "\"");
+        }
+        File.WriteAllText(path, text.Replace("\n", "\r\n"), new UTF8Encoding(true));
+        Note("wrote full config.json");
+    }
+
+    static bool IsShortConfig(string text) {
+        if (string.IsNullOrWhiteSpace(text)) return true;
+        if (text.IndexOf("LocalDesktopPath", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+        if (text.IndexOf("Widget", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+        if (text.IndexOf("EmergencyFolder", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+        if (text.IndexOf("JiraBaseUrl", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+        if (text.IndexOf("ServiceDesk", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+        return text.Length < 1200;
+    }
+
+    static string JsonString(string text, string name) {
+        string key = "\"" + name + "\"";
+        int at = text.IndexOf(key, StringComparison.OrdinalIgnoreCase);
+        if (at < 0) return "";
+        int colon = text.IndexOf(':', at + key.Length);
+        if (colon < 0) return "";
+        int quote = text.IndexOf('"', colon + 1);
+        if (quote < 0) return "";
+        var value = new StringBuilder();
+        for (int i = quote + 1; i < text.Length; i++) {
+            char ch = text[i];
+            if (ch == '\\' && i + 1 < text.Length) {
+                value.Append(ch);
+                value.Append(text[++i]);
+                continue;
+            }
+            if (ch == '"') break;
+            value.Append(ch);
+        }
+        return value.ToString();
+    }
+
+    static string ReplaceFirst(string text, string oldValue, string newValue) {
+        int at = text.IndexOf(oldValue, StringComparison.Ordinal);
+        if (at < 0) return text;
+        return text.Substring(0, at) + newValue + text.Substring(at + oldValue.Length);
+    }
+
+    static string ReadResource(string name) {
+        using (Stream source = Assembly.GetExecutingAssembly().GetManifestResourceStream(name)) {
+            if (source == null) throw new FileNotFoundException(name);
+            using (var reader = new StreamReader(source, new UTF8Encoding(false), true)) {
+                return reader.ReadToEnd();
+            }
+        }
     }
 
     static void RefreshScripts(string directory) {

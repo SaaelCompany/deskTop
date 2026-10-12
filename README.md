@@ -113,14 +113,14 @@ MSI ставится на компьютер, не на одного польз�
 msiexec /i DesktopSwitch.msi /qn /l*v C:\Windows\Temp\DesktopSwitch-install.log
 ```
 
-Код продукта этой сборки: `{D4F17A82-6E30-4C91-B5A8-1C9E7F2B0D64}`. Код обновления, он не меняется между версиями: `{4048E9C4-7965-48DC-A23D-A4554966E57F}`.
+Код продукта этой сборки: `{B3A91E06-4C72-4E18-8D5F-7A2C9B1E6D40}`. Код обновления, он не меняется между версиями: `{4048E9C4-7965-48DC-A23D-A4554966E57F}`.
 
-Обнаружение для SCCM: установлен этот код продукта, либо существует `C:\Program Files\DesktopSwitch\DesktopSwitch.exe`, либо в `HKLM\Software\SaaelCompany\DesktopSwitch` значение `Version` равно `1.2.31`.
+Обнаружение для SCCM: установлен этот код продукта, либо существует `C:\Program Files\DesktopSwitch\DesktopSwitch.exe`, либо в `HKLM\Software\SaaelCompany\DesktopSwitch` значение `Version` равно `1.2.32`.
 
 Удаление:
 
 ```text
-msiexec /x {D4F17A82-6E30-4C91-B5A8-1C9E7F2B0D64} /qn
+msiexec /x {B3A91E06-4C72-4E18-8D5F-7A2C9B1E6D40} /qn
 ```
 
 Чтобы заменить файлы той же версии, в том числе `config.json`:
@@ -177,6 +177,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ProgramFiles%\DesktopS
 ## Пробный запуск без установки
 
 В архиве `dist/DesktopSwitch-portable.zip` лежит папка для просмотра. Её распаковывают на локальный диск и запускают `Start-DesktopSwitch.vbs`. Установка и права администратора не нужны. В `config.json` этой копии `Preview` равен `true`: окно и значок у часов есть, рабочий стол не переключается. Чтобы включить переключение, поставьте `Preview` в `false` и `Enabled` в `true`.
+
+Если запустить один `DesktopSwitch.exe` и рядом нет `config.json`, либо в нём только три поля `Enabled`, `Preview` и `NetworkDesktopPath`, программа записывает полный файл по образцу `config.example.json`: `Enabled` становится `true`, `Preview` — `false`. Уже заполненный `config.json` она не перезаписывает. В коротком файле `Preview` был `true`, поэтому стол не переключался.
 
 Программа написана на Windows PowerShell 5.1. Отдельного файла формы нет: окно, кнопка и список новостей создаются кодом Windows Forms в `DesktopSwitch.Widget.ps1`. `DesktopSwitch.ps1` следит за сетью, `DesktopSwitch.Logic.ps1` принимает решение о переключении стола. `DesktopSwitch.exe` — оконная оболочка без консоли: процесс в диспетчере задач называется DesktopSwitch, а скрипты выполняются внутри него.
 
