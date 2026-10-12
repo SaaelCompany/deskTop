@@ -167,7 +167,7 @@ function Get-WidgetPalette {
             Hover = @(244, 244, 245)
             Selection = @(232, 240, 255)
             Rule = @(244, 244, 245)
-            Accent = @(47, 107, 255)
+            Accent = @(220, 38, 38)
             AccentHover = @(37, 90, 230)
             StatusMuted = @(113, 113, 122)
             StatusLocal = @(185, 28, 28)
@@ -191,7 +191,7 @@ function Get-WidgetPalette {
         Hover = @(48, 48, 54)
         Selection = @(46, 58, 82)
         Rule = @(63, 63, 70)
-        Accent = @(47, 107, 255)
+        Accent = @(220, 38, 38)
         AccentHover = @(37, 90, 230)
         StatusMuted = @(161, 161, 170)
         StatusLocal = @(248, 113, 113)
@@ -369,7 +369,13 @@ function Get-EffectiveDesktopConfig {
     $cornerKey = 'bottomright'
     if ($cornerMap.ContainsKey($cornerRaw)) { $cornerKey = $cornerRaw }
 
-    $localRaw = [string](Get-Prop $Config 'LocalDesktopPath' '%LOCALAPPDATA%\DesktopSwitch\LocalDesktop')
+    $localRaw = [string](Get-Prop $Config 'LocalDesktopPath' 'C:\Users\Public\Desktop')
+    if ([string]::IsNullOrWhiteSpace($localRaw)) { $localRaw = 'C:\Users\Public\Desktop' }
+    $localKey = $localRaw.Replace('/', '\').Trim().TrimEnd('\')
+    if ($localKey.EndsWith('DesktopSwitch\LocalDesktop')) { $localRaw = 'C:\Users\Public\Desktop' }
+    $localPath = ConvertTo-ExpandedPath $localRaw
+    $syncShortcuts = ConvertTo-Bool (Get-Prop $Config 'SyncShortcutsWhileOnline' $false) $false
+    if ($localPath.Trim().TrimEnd('\') -eq 'C:\Users\Public\Desktop') { $syncShortcuts = $false }
     $logRaw = [string](Get-Prop $Config 'LogPath' '%LOCALAPPDATA%\DesktopSwitch\desktop-switch.log')
     $stateRaw = [string](Get-Prop $Config 'StatePath' '%LOCALAPPDATA%\DesktopSwitch\state.json')
     $serviceDeskUrl = Select-SingleHttpUrl (Get-Prop $widget 'ServiceDeskUrl' '')
@@ -383,7 +389,7 @@ function Get-EffectiveDesktopConfig {
     return [pscustomobject]@{
         Enabled = ConvertTo-Bool (Get-Prop $Config 'Enabled' $false) $false
         NetworkDesktopPath = ([string](Get-Prop $Config 'NetworkDesktopPath' '')).Trim()
-        LocalDesktopPath = ConvertTo-ExpandedPath $localRaw
+        LocalDesktopPath = $localPath
         Trigger = $triggerMap[$triggerKey]
         CheckIntervalSeconds = Get-ClampedInterval (ConvertTo-Int (Get-Prop $Config 'CheckIntervalSeconds' 5) 5)
         FailuresBeforeSwitch = Get-ClampedCount (ConvertTo-Int (Get-Prop $Config 'FailuresBeforeSwitch' 2) 2)
@@ -392,7 +398,7 @@ function Get-EffectiveDesktopConfig {
         RestartExplorer = ConvertTo-Bool (Get-Prop $Config 'RestartExplorer' $true) $true
         NotifyUser = ConvertTo-Bool (Get-Prop $Config 'NotifyUser' $true) $true
         Preview = ConvertTo-Bool (Get-Prop $Config 'Preview' $false) $false
-        SyncShortcutsWhileOnline = ConvertTo-Bool (Get-Prop $Config 'SyncShortcutsWhileOnline' $true) $true
+        SyncShortcutsWhileOnline = $syncShortcuts
         SyncExtensions = $extensions.ToArray()
         UseWindowsConnectivity = ConvertTo-Bool (Get-Prop $internet 'UseWindowsConnectivity' $true) $true
         ProbeUrls = @($selectedProbes)
@@ -451,7 +457,7 @@ function Get-DesktopConfigErrors {
     } elseif (Test-UncPathString $local) {
         $errors.Add('LocalDesktopPath должен быть папкой на локальном диске, а не сетевым путём.')
     } elseif ($local -notmatch '^[A-Za-z]:\\') {
-        $errors.Add('LocalDesktopPath после подстановки переменных должен быть путём вида C:\Users\имя\AppData\Local\DesktopSwitch\LocalDesktop.')
+        $errors.Add('LocalDesktopPath после подстановки переменных должен быть путём вида C:\Users\Public\Desktop.')
     } elseif ($local -match '^[A-Za-z]:\\$') {
         $errors.Add('LocalDesktopPath не должен быть корнем диска.')
     }

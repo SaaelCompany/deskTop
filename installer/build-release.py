@@ -9,8 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = Path(__file__).resolve().parent
-VERSION = "1.2.33"
-PRODUCT_CODE = "{E5C18A27-6B34-4F09-A1D2-8C7E3F5B9A16}"
+VERSION = "1.2.34"
+PRODUCT_CODE = "{F6D29B38-7C45-4A10-B2E3-9D8F4A6C0B27}"
 UPGRADE_CODE = "{4048E9C4-7965-48DC-A23D-A4554966E57F}"
 
 
@@ -23,7 +23,7 @@ def render_icon(size):
     pixels = [[(0, 0, 0, 0) for _ in range(size)] for _ in range(size)]
     cx = (size - 1) / 2.0
     radius = size / 2.0 - 0.75
-    accent = (47, 107, 255, 255)
+    accent = (220, 38, 38, 255)
     for y in range(size):
         for x in range(size):
             if (x - cx) ** 2 + (y - cx) ** 2 <= radius ** 2:
@@ -41,15 +41,12 @@ def render_icon(size):
                     pixels[yy][xx] = color
 
     white = (255, 255, 255, 255)
-    for y in range(9, 20):
-        for x in range(9, 23):
-            left = x < 12 and (y < 11 or y > 17)
-            right = x > 19 and (y < 11 or y > 17)
-            if left or right:
-                continue
-            mark(x, y, white)
-    for x, y in ((13, 20), (14, 21), (15, 22), (16, 21), (17, 20)):
-        mark(x, y, white)
+    for y in range(7, 20):
+        mark(15, y, white)
+        mark(16, y, white)
+    for y in range(23, 26):
+        mark(15, y, white)
+        mark(16, y, white)
     return pixels
 
 

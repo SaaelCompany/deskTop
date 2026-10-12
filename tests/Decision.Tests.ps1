@@ -202,7 +202,14 @@ Assert-Equal 'default failures' $defaults.FailuresBeforeSwitch 2
 Assert-Equal 'default successes' $defaults.SuccessesBeforeRestore 2
 Assert-Equal 'probe stays long while windows is unsure' (Get-InternetProbeTimeout -Configured 5 -WindowsInternet $null) 5
 Assert-Equal 'probe shortens when windows is down' (Get-InternetProbeTimeout -Configured 5 -WindowsInternet $false) 2
-Assert-Equal 'default local' $defaults.LocalDesktopPath 'C:\Users\TestUser\AppData\Local\DesktopSwitch\LocalDesktop'
+Assert-Equal 'default local' $defaults.LocalDesktopPath 'C:\Users\Public\Desktop'
+Assert-Equal 'sync off by default' $defaults.SyncShortcutsWhileOnline $false
+$legacyLocal = Get-EffectiveDesktopConfig ([pscustomobject]@{ LocalDesktopPath = '%LOCALAPPDATA%\DesktopSwitch\LocalDesktop' })
+Assert-Equal 'legacy local becomes public desktop' $legacyLocal.LocalDesktopPath 'C:\Users\Public\Desktop'
+$publicSync = Get-EffectiveDesktopConfig ([pscustomobject]@{ SyncShortcutsWhileOnline = $true; LocalDesktopPath = 'C:\Users\Public\Desktop' })
+Assert-Equal 'public desktop is not a copy target' $publicSync.SyncShortcutsWhileOnline $false
+$otherSync = Get-EffectiveDesktopConfig ([pscustomobject]@{ SyncShortcutsWhileOnline = $true; LocalDesktopPath = 'C:\Offline\Desk' })
+Assert-Equal 'other folder can still copy' $otherSync.SyncShortcutsWhileOnline $true
 Assert-Equal 'default probe count' @($defaults.ProbeUrls).Count 1
 Assert-Equal 'default probe body' $defaults.ExpectedProbeBody 'Microsoft Connect Test'
 Assert-Equal 'default extensions' (@($defaults.SyncExtensions) -join ',') '.lnk,.url'
@@ -433,6 +440,7 @@ $darkPalette = Get-WidgetPalette -Light $false
 Assert-Equal 'light card' $lightPalette.Canvas[0] 255
 Assert-True 'dark card' ($darkPalette.Canvas[0] -lt 80)
 Assert-Equal 'shared accent' $lightPalette.Accent[0] $darkPalette.Accent[0]
+Assert-Equal 'default accent is red' $lightPalette.Accent[0] 220
 Assert-True 'dark selection is quiet' ($darkPalette.Selection[1] -lt 90)
 Assert-Equal 'icon empty by default' $widgetCfg.WidgetIcon ''
 $iconCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ Icon = ' icons\chat.png ' } })

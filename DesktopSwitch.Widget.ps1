@@ -285,6 +285,22 @@ public static class DeskLayer {
         return path;
     }
 
+    static void DrawExclamation(Graphics g, float size) {
+        float s = size / 52f;
+        float weight = 3.4f * s;
+        if (weight < 1.6f) weight = 1.6f;
+        using (Pen pen = new Pen(Color.White, weight)) {
+            pen.StartCap = LineCap.Round;
+            pen.EndCap = LineCap.Round;
+            g.DrawLine(pen, 26f * s, 12f * s, 26f * s, 31f * s);
+        }
+        using (SolidBrush brush = new SolidBrush(Color.White)) {
+            float d = 5.2f * s;
+            if (d < 2.4f) d = 2.4f;
+            g.FillEllipse(brush, 26f * s - d / 2f, 36.5f * s, d, d);
+        }
+    }
+
     static void DrawNoticeBadge(Graphics g, int badge, int size) {
         string text = badge > 9 ? "9+" : badge.ToString();
         float height = 20f;
@@ -358,18 +374,7 @@ public static class DeskLayer {
                     drewIcon = false;
                 }
             }
-            if (!drewIcon) {
-                using (Pen pen = new Pen(Color.White, 1.7f)) {
-                    pen.StartCap = LineCap.Round;
-                    pen.EndCap = LineCap.Round;
-                    pen.LineJoin = LineJoin.Round;
-                    using (GraphicsPath bubble = RoundRect(15, 16, 22, 16, 7)) {
-                        g.DrawPath(pen, bubble);
-                    }
-                    g.DrawLine(pen, 22, 31, 19, 36);
-                    g.DrawLine(pen, 19, 36, 27, 31);
-                }
-            }
+            if (!drewIcon) DrawExclamation(g, size);
             }
             if (badge > 0 && !open) DrawNoticeBadge(g, badge, size);
         }
@@ -431,19 +436,7 @@ public static class DeskLayer {
             using (SolidBrush brush = new SolidBrush(accent)) {
                 g.FillEllipse(brush, 0.5f, 0.5f, 31f, 31f);
             }
-            using (Pen pen = new Pen(Color.White, 1.5f)) {
-                pen.StartCap = LineCap.Round;
-                pen.EndCap = LineCap.Round;
-                pen.LineJoin = LineJoin.Round;
-                float s = 32f / 52f;
-                using (GraphicsPath bubble = RoundRect(0f, 0f, 22f * s, 16f * s, 7f * s)) {
-                    g.TranslateTransform(15f * s, 16f * s);
-                    g.DrawPath(pen, bubble);
-                    g.ResetTransform();
-                }
-                g.DrawLine(pen, 22f * s, 31f * s, 19f * s, 36f * s);
-                g.DrawLine(pen, 19f * s, 36f * s, 27f * s, 31f * s);
-            }
+            DrawExclamation(g, size);
         }
         IntPtr handle = IntPtr.Zero;
         try {
@@ -477,7 +470,7 @@ public class DeskMenuColors : ProfessionalColorTable {
     public Color Ink = Color.FromArgb(24, 24, 27);
     public Color Hover = Color.FromArgb(244, 244, 245);
     public Color Rule = Color.FromArgb(244, 244, 245);
-    public Color Accent = Color.FromArgb(47, 107, 255);
+    public Color Accent = Color.FromArgb(220, 38, 38);
     public override Color ToolStripDropDownBackground { get { return Canvas; } }
     public override Color MenuBorder { get { return Rule; } }
     public override Color MenuItemBorder { get { return Hover; } }
@@ -635,7 +628,7 @@ function Update-LauncherSurface {
         $shown = [string]$script:Cfg.WidgetColor
         $opaque = 100
         if ($script:Cfg.PSObject.Properties['WidgetOpacity']) { $opaque = [int]$script:Cfg.WidgetOpacity }
-        if ([string]::IsNullOrWhiteSpace($shown)) { $shown = '#2F6BFF' }
+        if ([string]::IsNullOrWhiteSpace($shown)) { $shown = '#DC2626' }
         Write-Log ("Кнопка: цвет {0}, непрозрачность {1}%." -f $shown, $opaque)
     }
     $icon = ''
@@ -708,9 +701,9 @@ function Get-ThemeColor {
 
 function Get-LauncherFill {
     param([switch]$Hover)
-    $red = 47
-    $green = 107
-    $blue = 255
+    $red = 220
+    $green = 38
+    $blue = 38
     $accent = Get-ThemeColor Accent
     $red = [int]$accent.R
     $green = [int]$accent.G
@@ -2215,17 +2208,14 @@ function New-LauncherButton {
             }
         }
         if (-not $drewIcon) {
-            $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White, 1.6)
+            $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White, 3.4)
             $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
             $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-            $bubble = New-RoundedPath -Width 22 -Height 16 -Radius 7
-            $g.TranslateTransform(15, 16)
-            $g.DrawPath($pen, $bubble)
-            $g.ResetTransform()
-            $bubble.Dispose()
-            $g.DrawLine($pen, 22, 31, 19, 36)
-            $g.DrawLine($pen, 19, 36, 27, 31)
+            $g.DrawLine($pen, 26, 12, 26, 31)
             $pen.Dispose()
+            $dot = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
+            $g.FillEllipse($dot, 23.4, 36.5, 5.2, 5.2)
+            $dot.Dispose()
         }
         }
         $count = Get-LauncherBadgeCount
@@ -2270,8 +2260,7 @@ function New-LauncherButton {
         $now = Get-Date
         if (($now - $script:LauncherClickAt).TotalMilliseconds -lt 400) { return }
         $script:LauncherClickAt = $now
-        if ($script:PanelOpen) { Hide-SupportPanel }
-        else { Show-SupportPanel -Page $script:WidgetPage }
+        Open-EmergencyFolder
     })
     $form.Add_HandleCreated({ Attach-LauncherClickHook $form }.GetNewClosure())
     $form.Add_FormClosing({
@@ -3009,27 +2998,18 @@ function New-DesktopWidget {
     $script:PanelForm = $null
     $launcher = New-LauncherButton
     $script:WidgetForm = $launcher
-    Import-NoticeLog
-    $script:PanelForm = New-SupportPanel
-    $script:PanelForm.Owner = $launcher
-    $script:NewsSignature = $null
-    Apply-SupportPageVisual -Page Ticket
-    Update-WidgetChrome
-    Set-SupportBounds
     Ensure-TrayIcon
     Register-ThemeChanges
     Set-LauncherChrome
     Invoke-WindowChrome -Form $launcher -Launcher
-    Invoke-WindowChrome -Form $script:PanelForm
     Apply-WidgetZOrder
-    Start-JiraCatalogLoad
-    if (Test-ShowLauncher) { Write-Log 'Кнопка поддержки показана в углу экрана.' }
-    else { Write-Log 'Кнопка поддержки скрыта. Программа остаётся у часов.' }
+    if (Test-ShowLauncher) { Write-Log 'Красная кнопка показана в углу экрана.' }
+    else { Write-Log 'Кнопка скрыта. Программа остаётся у часов.' }
 }
 
 function Ensure-DesktopWidget {
     if ($script:WidgetForm -and -not $script:WidgetForm.IsDisposed -and $script:WidgetForm.IsHandleCreated) {
-        Update-WidgetChrome
+        Update-LauncherSurface
         return
     }
     New-DesktopWidget
@@ -3039,7 +3019,7 @@ function Ensure-TrayIcon {
     if ($script:TrayIcon) { return }
     $icon = New-Object System.Windows.Forms.NotifyIcon
     $icon.Icon = [System.Drawing.SystemIcons]::Application
-    $icon.Text = 'Сервисная служба'
+    $icon.Text = 'Аварийная папка'
     $icon.Visible = $true
     $script:TrayIconOwned = $false
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
@@ -3050,17 +3030,9 @@ function Ensure-TrayIcon {
     $menu.ShowCheckMargin = $true
     $itemPad = New-Object System.Windows.Forms.Padding(6, 4, 12, 4)
     $openItem = New-Object System.Windows.Forms.ToolStripMenuItem
-    $openItem.Text = 'Открыть'
+    $openItem.Text = 'Открыть папку'
     $openItem.Padding = $itemPad
-    $ticketItem = New-Object System.Windows.Forms.ToolStripMenuItem
-    $ticketItem.Text = 'Заявка'
-    $ticketItem.Padding = $itemPad
-    $newsItem = New-Object System.Windows.Forms.ToolStripMenuItem
-    $newsItem.Text = 'Аварийная папка'
-    $newsItem.Padding = $itemPad
     [void]$menu.Items.Add($openItem)
-    [void]$menu.Items.Add($ticketItem)
-    [void]$menu.Items.Add($newsItem)
     [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
     $buttonItem = New-Object System.Windows.Forms.ToolStripMenuItem
     $buttonItem.Text = 'Кнопка на экране'
@@ -3084,9 +3056,7 @@ function Ensure-TrayIcon {
         [void]$menu.Items.Add($exitItem)
         $exitItem.Add_Click({ Stop-DesktopWidgetApp })
     }
-    $openItem.Add_Click({ Show-SupportPanel -Page $script:WidgetPage })
-    $ticketItem.Add_Click({ Show-SupportPanel -Page Ticket })
-    $newsItem.Add_Click({ Open-EmergencyFolder })
+    $openItem.Add_Click({ Open-EmergencyFolder })
     $buttonItem.Add_Click({
         $show = [bool]$script:LauncherMenuItem.Checked
         if ($script:State) {
@@ -3119,7 +3089,7 @@ function Ensure-TrayIcon {
     $script:TrayMenu = $menu
     $script:TrayIcon = $icon
     Apply-TrayMenuPalette
-    $icon.Add_DoubleClick({ Show-SupportPanel -Page Ticket })
+    $icon.Add_DoubleClick({ Open-EmergencyFolder })
 }
 
 function Stop-DesktopWidgetApp {
@@ -3579,16 +3549,14 @@ function Open-EmergencyFolder {
     $path = ''
     if ($script:Cfg) { $path = [string]$script:Cfg.EmergencyFolder }
     if ([string]::IsNullOrWhiteSpace($path)) {
-        Set-TicketStatusMessage -Text 'В config.json не указана EmergencyFolder.' -IsError $true
-        Show-SupportPanel -Page Ticket
+        Show-StartupProblem 'В config.json не указана папка EmergencyFolder.'
         return
     }
     if (-not (Test-Path -LiteralPath $path)) {
-        Set-TicketStatusMessage -Text ('Папка не найдена: ' + $path) -IsError $true
-        Show-SupportPanel -Page Ticket
+        Show-StartupProblem ('Папка не найдена: ' + $path)
         return
     }
-    Write-Log ("Открываю аварийную папку {0}." -f $path)
+    Write-Log ("Открываю папку {0}." -f $path)
     Start-Process -FilePath 'explorer.exe' -ArgumentList @($path)
 }
 
