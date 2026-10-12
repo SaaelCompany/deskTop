@@ -3597,17 +3597,23 @@ function Start-WidgetApplication {
     Add-Type -AssemblyName System.Drawing
     [System.Windows.Forms.Application]::EnableVisualStyles()
     $script:WidgetContext = New-Object System.Windows.Forms.ApplicationContext
-    try { Invoke-MonitorCycle } catch { Write-Log ("Сбой цикла: {0}" -f $_.Exception.Message) 'ERROR' }
+    # The button has to exist before the first network check. That check can sit
+    # on a share or on the shell path, and until it returns the window never appeared.
     try { Ensure-DesktopWidget } catch {
         Write-Log ("Сбой виджета: {0}" -f $_.Exception.ToString()) 'ERROR'
         throw
     }
-    $timer = New-Object System.Windows.Forms.Timer
-    $timer.Interval = [Math]::Max(5000, ([int]$script:Cfg.CheckIntervalSeconds * 1000))
-    $timer.Add_Tick({
+    $script:MonitorTimerReady = $false
+    $script:MonitorTimer = New-Object System.Windows.Forms.Timer
+    $script:MonitorTimer.Interval = 400
+    $script:MonitorTimer.Add_Tick({
+        if (-not $script:MonitorTimerReady) {
+            $script:MonitorTimerReady = $true
+            $script:MonitorTimer.Interval = [Math]::Max(5000, ([int]$script:Cfg.CheckIntervalSeconds * 1000))
+        }
         try { Invoke-MonitorCycle } catch { Write-Log ("Сбой цикла: {0}" -f $_.Exception.Message) 'ERROR' }
         try { Ensure-DesktopWidget } catch { Write-Log ("Сбой виджета: {0}" -f $_.Exception.Message) 'ERROR' }
     })
-    $timer.Start()
+    $script:MonitorTimer.Start()
     [System.Windows.Forms.Application]::Run($script:WidgetContext)
 }

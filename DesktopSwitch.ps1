@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.32'
+$script:Version = '1.2.33'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -761,6 +761,9 @@ function Invoke-MonitorCycle {
                 if (Get-Command -Name Ensure-DesktopWidget -ErrorAction SilentlyContinue) {
                     try { Ensure-DesktopWidget } catch { Write-Log ("Виджет не удалось вернуть на стол: {0}" -f $_.Exception.Message) 'WARN' }
                 }
+                if (Get-Command -Name Set-LauncherChrome -ErrorAction SilentlyContinue) {
+                    try { Set-LauncherChrome } catch { Write-Log ("Кнопку не удалось показать снова: {0}" -f $_.Exception.Message) 'WARN' }
+                }
             } else {
                 Write-Log 'Путь записан. Повторный перезапуск Проводника отложен, чтобы не закрывать его окна слишком часто.' 'WARN'
             }
@@ -820,6 +823,7 @@ if ($Status) {
 try {
     Assert-StaticConfig
 } catch {
+    Show-StartupProblem ([string]$_.Exception.Message)
     exit 1
 }
 
