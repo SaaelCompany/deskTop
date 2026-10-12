@@ -1,0 +1,6 @@
+config.json
+installer/config.sccm.json
+installer/stage/
+*.log
+*.log.1
+state.json
