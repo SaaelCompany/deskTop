@@ -433,6 +433,7 @@ function Get-EffectiveDesktopConfig {
         WidgetOpacity = Resolve-WidgetOpacity (Get-Prop $widget 'Opacity' $null) $widgetColorText
         WidgetCorner = $cornerMap[$cornerKey]
         WidgetMargin = Get-ClampedMargin (ConvertTo-Int (Get-Prop $widget 'Margin' 16) 16)
+        HideButtonWhenOnline = ConvertTo-Bool (Get-Prop $widget 'HideWhenOnline' (Get-Prop $Config 'HideWhenOnline' $false)) $false
         EmergencyFolder = ConvertTo-ExpandedPath ([string](Get-Prop $Config 'EmergencyFolder' ''))
         ServiceDeskUrl = $serviceDeskUrl
         ServiceDeskApiUrl = $serviceDeskApi
@@ -758,7 +759,7 @@ function Get-SwitchMessage {
         }
         return 'Нет доступа к сети. Включён локальный рабочий стол.' + $tail
     }
-    if ($Action -eq 'SwitchToNetwork') {
+    if ($Action -eq 'SwitchToNetwork' -or $Action -eq 'ReassertNetwork') {
         return 'Доступ к сети восстановлен. Снова включён сетевой рабочий стол.'
     }
     return ''
@@ -833,6 +834,21 @@ function Update-SwitchDecision {
     }
 }
 
+function Get-EffectiveSwitchAction {
+    param(
+        [string]$Action,
+        [string]$CurrentPath,
+        [string]$NetworkPath,
+        [bool]$RestoreWhenOnline
+    )
+    # After a restore the saved mode is already Network. If the shell path is still
+    # local, StayNetwork would never write the UNC again.
+    if ($Action -eq 'StayNetwork' -and $RestoreWhenOnline -and (Test-UncPathString $NetworkPath)) {
+        if (-not (Compare-DesktopPath $CurrentPath $NetworkPath)) { return 'ReassertNetwork' }
+    }
+    return $Action
+}
+
 function Test-DesktopChangeNeeded {
     param(
         [string]$Action,
@@ -843,7 +859,7 @@ function Test-DesktopChangeNeeded {
     if ($Action -eq 'SwitchToLocal' -or $Action -eq 'ReassertLocal') {
         return -not (Compare-DesktopPath $CurrentPath $LocalPath)
     }
-    if ($Action -eq 'SwitchToNetwork') {
+    if ($Action -eq 'SwitchToNetwork' -or $Action -eq 'ReassertNetwork') {
         return -not (Compare-DesktopPath $CurrentPath $NetworkPath)
     }
     return $false
@@ -856,8 +872,22 @@ function Get-ActionTargetPath {
         [string]$NetworkPath
     )
     if ($Action -eq 'SwitchToLocal' -or $Action -eq 'ReassertLocal') { return $LocalPath }
-    if ($Action -eq 'SwitchToNetwork') { return $NetworkPath }
+    if ($Action -eq 'SwitchToNetwork' -or $Action -eq 'ReassertNetwork') { return $NetworkPath }
     return ''
+}
+
+function Resolve-ButtonVisible {
+    param(
+        [bool]$UserWantsButton,
+        [bool]$HideWhenOnline,
+        [string]$Internet,
+        [bool]$VisibleWhenUnsure
+    )
+    if (-not $UserWantsButton) { return $false }
+    if (-not $HideWhenOnline) { return $true }
+    if ($Internet -eq 'Up') { return $false }
+    if ($Internet -eq 'Down') { return $true }
+    return $VisibleWhenUnsure
 }
 
 function Test-ShouldSyncShortcuts {

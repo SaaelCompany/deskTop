@@ -32,6 +32,9 @@ $script:LauncherClickAt = [datetime]::MinValue
 $script:WidgetContext = $null
 $script:DesktopMode = ''
 $script:DesktopVerdict = ''
+$script:InternetStatus = ''
+$script:LastLauncherVisible = $null
+$script:LauncherMenuSync = $false
 $script:JiraDesks = @()
 $script:JiraRequestTypes = @()
 $script:JiraLoaded = $false
@@ -821,8 +824,18 @@ function New-UiFont {
 }
 
 function Test-ShowLauncher {
-    if ($null -eq $script:State) { return $true }
-    return Resolve-ShowLauncher $script:State.ShowLauncher
+    $user = $true
+    if ($null -ne $script:State) { $user = Resolve-ShowLauncher $script:State.ShowLauncher }
+    $hide = $false
+    if ($script:Cfg -and $script:Cfg.PSObject.Properties['HideButtonWhenOnline']) {
+        $hide = [bool]$script:Cfg.HideButtonWhenOnline
+    }
+    $unsure = $true
+    if ($hide) {
+        $unsure = $false
+        if ($script:WidgetForm -and -not $script:WidgetForm.IsDisposed -and $script:WidgetForm.Visible) { $unsure = $true }
+    }
+    return Resolve-ButtonVisible -UserWantsButton $user -HideWhenOnline $hide -Internet ([string]$script:InternetStatus) -VisibleWhenUnsure $unsure
 }
 
 function Get-WidgetCorner {
@@ -1082,8 +1095,23 @@ function Unregister-ThemeChanges {
 }
 
 function Set-LauncherChrome {
+    $user = $true
+    if ($null -ne $script:State) { $user = Resolve-ShowLauncher $script:State.ShowLauncher }
+    if ($script:LauncherMenuItem -and ($script:LauncherMenuItem.Checked -ne $user)) {
+        $script:LauncherMenuSync = $true
+        try { $script:LauncherMenuItem.Checked = $user } finally { $script:LauncherMenuSync = $false }
+    }
     $show = Test-ShowLauncher
-    if ($script:LauncherMenuItem) { $script:LauncherMenuItem.Checked = $show }
+    if ($script:LastLauncherVisible -ne $show) {
+        $script:LastLauncherVisible = $show
+        if ($show) {
+            Write-Log 'Красная кнопка показана в углу экрана.'
+        } elseif ($user -and $script:Cfg -and $script:Cfg.PSObject.Properties['HideButtonWhenOnline'] -and $script:Cfg.HideButtonWhenOnline) {
+            Write-Log 'Кнопка скрыта, пока интернет есть.'
+        } else {
+            Write-Log 'Кнопка скрыта. Программа остаётся у часов.'
+        }
+    }
     $launcher = $script:WidgetForm
     if ($null -eq $launcher -or $launcher.IsDisposed) { return }
     if (-not $show) {
@@ -2114,6 +2142,7 @@ function Update-WidgetChrome {
 
 function Update-WidgetStatus {
     Update-WidgetChrome
+    Set-LauncherChrome
 }
 
 function Hide-SupportPanel {
@@ -3009,8 +3038,6 @@ function New-DesktopWidget {
     Set-LauncherChrome
     Invoke-WindowChrome -Form $launcher -Launcher
     Apply-WidgetZOrder
-    if (Test-ShowLauncher) { Write-Log 'Красная кнопка показана в углу экрана.' }
-    else { Write-Log 'Кнопка скрыта. Программа остаётся у часов.' }
 }
 
 function Ensure-DesktopWidget {
@@ -3065,6 +3092,7 @@ function Ensure-TrayIcon {
     }
     $openItem.Add_Click({ Open-EmergencyFolder })
     $buttonItem.Add_Click({
+        if ($script:LauncherMenuSync) { return }
         $show = [bool]$script:LauncherMenuItem.Checked
         if ($script:State) {
             $script:State.ShowLauncher = $show

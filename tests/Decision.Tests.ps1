@@ -164,6 +164,49 @@ Assert-True 'reassert when policy restored unc' (Test-DesktopChangeNeeded -Actio
 Assert-True 'reassert skipped when local holds' (-not (Test-DesktopChangeNeeded -Action 'ReassertLocal' -CurrentPath 'C:\Cache' -LocalPath 'C:\Cache' -NetworkPath '\\fs\share\Desktop'))
 Assert-True 'stay does not rewrite' (-not (Test-DesktopChangeNeeded -Action 'StayNetwork' -CurrentPath 'C:\Cache' -LocalPath 'C:\Cache' -NetworkPath '\\fs\share\Desktop'))
 Assert-True 'restore when different' (Test-DesktopChangeNeeded -Action 'SwitchToNetwork' -CurrentPath 'C:\Cache' -LocalPath 'C:\Cache' -NetworkPath '\\fs\share\Desktop')
+Assert-Equal 'drift back to network' (Get-EffectiveSwitchAction -Action 'StayNetwork' -CurrentPath 'C:\Users\Public\Desktop' -NetworkPath '\\fs\share\Desktop' -RestoreWhenOnline $true) 'ReassertNetwork'
+Assert-Equal 'stay when the unc is current' (Get-EffectiveSwitchAction -Action 'StayNetwork' -CurrentPath '\\fs\share\Desktop' -NetworkPath '\\fs\share\Desktop' -RestoreWhenOnline $true) 'StayNetwork'
+Assert-Equal 'drift ignored when restore is off' (Get-EffectiveSwitchAction -Action 'StayNetwork' -CurrentPath 'C:\Users\Public\Desktop' -NetworkPath '\\fs\share\Desktop' -RestoreWhenOnline $false) 'StayNetwork'
+Assert-True 'reassert network writes' (Test-DesktopChangeNeeded -Action 'ReassertNetwork' -CurrentPath 'C:\Users\Public\Desktop' -LocalPath 'C:\Users\Public\Desktop' -NetworkPath '\\fs\share\Desktop')
+Assert-Equal 'reassert network target' (Get-ActionTargetPath -Action 'ReassertNetwork' -LocalPath 'C:\Users\Public\Desktop' -NetworkPath '\\fs\share\Desktop') '\\fs\share\Desktop'
+Assert-Contains 'reassert network message' (Get-SwitchMessage -Action 'ReassertNetwork' -ReasonCode 'None') 'сетевой'
+
+function Walk-DesktopSwitch {
+    param([string[]]$Verdicts, [string]$StartPath)
+    $local = 'C:\Users\Public\Desktop'
+    $network = '\\fs\share\Desktop'
+    $path = $StartPath
+    $mode = Get-DesktopModeFromPath -CurrentPath $path -NetworkPath $network -LocalPath $local
+    $fail = 0
+    $ok = 0
+    $seenLocal = $false
+    $seenNetwork = (Compare-DesktopPath $path $network)
+    foreach ($verdict in $Verdicts) {
+        $step = Update-SwitchDecision -Verdict $verdict -Mode $mode -FailureStreak $fail -SuccessStreak $ok -FailuresBeforeSwitch 2 -SuccessesBeforeRestore 2 -RestoreWhenOnline $true
+        $stepAction = Get-EffectiveSwitchAction -Action ([string]$step.Action) -CurrentPath $path -NetworkPath $network -RestoreWhenOnline $true
+        if (Test-DesktopChangeNeeded -Action $stepAction -CurrentPath $path -LocalPath $local -NetworkPath $network) {
+            $stepTarget = Get-ActionTargetPath -Action $stepAction -LocalPath $local -NetworkPath $network
+            if (-not [string]::IsNullOrWhiteSpace($stepTarget)) { $path = $stepTarget }
+        }
+        if (Compare-DesktopPath $path $local) { $seenLocal = $true }
+        if (Compare-DesktopPath $path $network) { $seenNetwork = $true }
+        $mode = [string]$step.Mode
+        $fail = [int]$step.FailureStreak
+        $ok = [int]$step.SuccessStreak
+    }
+    return [pscustomobject]@{ Path = $path; Mode = $mode; SeenLocal = $seenLocal; SeenNetwork = $seenNetwork }
+}
+
+$round = Walk-DesktopSwitch -Verdicts @('Offline', 'Offline', 'Online', 'Online') -StartPath '\\fs\share\Desktop'
+Assert-True 'round trip visited local' $round.SeenLocal
+Assert-True 'round trip visited network' $round.SeenNetwork
+Assert-Equal 'round trip ends on network' $round.Path '\\fs\share\Desktop'
+Assert-Equal 'round trip mode is network' $round.Mode 'Network'
+$heldLocal = Walk-DesktopSwitch -Verdicts @('Offline', 'Offline', 'Offline') -StartPath '\\fs\share\Desktop'
+Assert-Equal 'two failures stay local' $heldLocal.Path 'C:\Users\Public\Desktop'
+Assert-Equal 'two failures mode local' $heldLocal.Mode 'Local'
+$oneMiss = Walk-DesktopSwitch -Verdicts @('Offline', 'Online', 'Online') -StartPath '\\fs\share\Desktop'
+Assert-Equal 'one outage does not leave the share' $oneMiss.Path '\\fs\share\Desktop'
 Assert-Equal 'target local' (Get-ActionTargetPath -Action 'SwitchToLocal' -LocalPath 'C:\Cache' -NetworkPath '\\fs\share') 'C:\Cache'
 Assert-Equal 'target network' (Get-ActionTargetPath -Action 'SwitchToNetwork' -LocalPath 'C:\Cache' -NetworkPath '\\fs\share') '\\fs\share'
 Assert-Equal 'target empty while waiting' (Get-ActionTargetPath -Action 'WaitOffline' -LocalPath 'C:\Cache' -NetworkPath '\\fs\share') ''
@@ -306,6 +349,7 @@ $exampleRaw = Get-Content -LiteralPath (Join-Path $root 'config.example.json') -
 Assert-True 'example file has no jira keys' ($exampleRaw -notmatch 'JiraBaseUrl|ServiceDesk|NewsJql')
 Assert-True 'example file names public desktop' ($exampleRaw.Contains('C:\Users\Public\Desktop') -or $exampleRaw.Contains('C:\\Users\\Public\\Desktop'))
 Assert-Equal 'example widget on' $exampleConfig.WidgetEnabled $true
+Assert-Equal 'example button stays while online' $exampleConfig.HideButtonWhenOnline $false
 Assert-Equal 'example emergency folder empty' $exampleConfig.EmergencyFolder ''
 $exampleErrors = Get-DesktopConfigErrors -NetworkPath $exampleConfig.NetworkDesktopPath -LocalPath $exampleConfig.LocalDesktopPath -AllowEmptyNetwork
 Assert-Equal 'example has no path error' $exampleErrors.Count 0
@@ -420,6 +464,17 @@ Assert-Equal 'root corner' $rootCorner.WidgetCorner 'TopLeft'
 $topCorner = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ Corner = 'TopRight' } })
 Assert-Equal 'corner top right' $topCorner.WidgetCorner 'TopRight'
 Assert-Equal 'widget can be disabled' $widgetCfg.WidgetEnabled $false
+Assert-Equal 'button stays visible by default' $defaults.HideButtonWhenOnline $false
+$hideButton = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ HideWhenOnline = $true } })
+Assert-Equal 'button can hide while online' $hideButton.HideButtonWhenOnline $true
+$rootHide = Get-EffectiveDesktopConfig ([pscustomobject]@{ HideWhenOnline = 'да' })
+Assert-Equal 'root hide flag' $rootHide.HideButtonWhenOnline $true
+Assert-Equal 'button visible while online by default' (Resolve-ButtonVisible -UserWantsButton $true -HideWhenOnline $false -Internet 'Up' -VisibleWhenUnsure $true) $true
+Assert-Equal 'button hidden while internet is up' (Resolve-ButtonVisible -UserWantsButton $true -HideWhenOnline $true -Internet 'Up' -VisibleWhenUnsure $true) $false
+Assert-Equal 'button returns when internet is down' (Resolve-ButtonVisible -UserWantsButton $true -HideWhenOnline $true -Internet 'Down' -VisibleWhenUnsure $false) $true
+Assert-Equal 'unknown internet keeps the button' (Resolve-ButtonVisible -UserWantsButton $true -HideWhenOnline $true -Internet 'Unknown' -VisibleWhenUnsure $true) $true
+Assert-Equal 'unknown internet can leave it hidden' (Resolve-ButtonVisible -UserWantsButton $true -HideWhenOnline $true -Internet '' -VisibleWhenUnsure $false) $false
+Assert-Equal 'user can hide the button' (Resolve-ButtonVisible -UserWantsButton $false -HideWhenOnline $false -Internet 'Down' -VisibleWhenUnsure $true) $false
 Assert-Equal 'preview off by default' $widgetCfg.Preview $false
 $previewCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{ Preview = $true; Enabled = $true })
 Assert-Equal 'preview can be enabled' $previewCfg.Preview $true

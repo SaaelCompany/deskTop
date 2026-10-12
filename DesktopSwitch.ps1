@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.37'
+$script:Version = '1.2.38'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -665,6 +665,9 @@ function Show-StatusReport {
     Write-Host ("Сетевая папка: {0}" -f (Format-StatusWord $share))
     Write-Host ("Итог: {0}" -f (Format-StatusWord $verdict))
     Write-Host ("Режим: {0}" -f (Format-StatusWord $mode))
+    $buttonText = 'на экране'
+    if ($script:Cfg.HideButtonWhenOnline) { $buttonText = 'скрыта, пока интернет есть' }
+    Write-Host ("Кнопка: {0}" -f $buttonText)
     $session = Get-WindowsSessionIdentity
     Write-Host ("Пользователь: {0}" -f $session.Login)
     Write-Host ("Компьютер: {0}" -f $session.Computer)
@@ -696,10 +699,12 @@ function Invoke-MonitorCycle {
         $mode = Get-DesktopModeFromPath -CurrentPath $current -NetworkPath $networkPath -LocalPath $script:Cfg.LocalDesktopPath
     }
     $decision = Update-SwitchDecision -Verdict $verdict -Mode $mode -FailureStreak ([int]$script:State.FailureStreak) -SuccessStreak ([int]$script:State.SuccessStreak) -FailuresBeforeSwitch $script:Cfg.FailuresBeforeSwitch -SuccessesBeforeRestore $script:Cfg.SuccessesBeforeRestore -RestoreWhenOnline $script:Cfg.RestoreWhenOnline
+    $action = Get-EffectiveSwitchAction -Action ([string]$decision.Action) -CurrentPath $current -NetworkPath $networkPath -RestoreWhenOnline $script:Cfg.RestoreWhenOnline
     $reason = Get-OfflineReasonCode -Internet $internet -Share $share
+    $script:InternetStatus = [string]$internet
     $script:DesktopMode = [string]$decision.Mode
     $script:DesktopVerdict = [string]$verdict
-    Write-Log ("internet={0} share={1} verdict={2} mode={3}->{4} action={5} fail={6} success={7} desktop={8}" -f $internet, $share, $verdict, $mode, $decision.Mode, $decision.Action, $decision.FailureStreak, $decision.SuccessStreak, $networkPath)
+    Write-Log ("internet={0} share={1} verdict={2} mode={3}->{4} action={5} fail={6} success={7} desktop={8}" -f $internet, $share, $verdict, $mode, $decision.Mode, $action, $decision.FailureStreak, $decision.SuccessStreak, $networkPath)
 
     $preview = $WhatIf -or $script:Cfg.Preview -or -not $script:Cfg.Enabled
     if (Test-ShouldSyncShortcuts -SyncEnabled $script:Cfg.SyncShortcutsWhileOnline -ShareStatus $share) {
@@ -710,9 +715,9 @@ function Invoke-MonitorCycle {
         }
     }
 
-    $target = Get-ActionTargetPath -Action $decision.Action -LocalPath $script:Cfg.LocalDesktopPath -NetworkPath $networkPath
-    $apply = Test-DesktopChangeNeeded -Action $decision.Action -CurrentPath $current -LocalPath $script:Cfg.LocalDesktopPath -NetworkPath $networkPath
-    if ($apply -and ($decision.Action -eq 'SwitchToLocal' -or $decision.Action -eq 'ReassertLocal')) {
+    $target = Get-ActionTargetPath -Action $action -LocalPath $script:Cfg.LocalDesktopPath -NetworkPath $networkPath
+    $apply = Test-DesktopChangeNeeded -Action $action -CurrentPath $current -LocalPath $script:Cfg.LocalDesktopPath -NetworkPath $networkPath
+    if ($apply -and ($action -eq 'SwitchToLocal' -or $action -eq 'ReassertLocal')) {
         if (Test-UncPathString $target) {
             Write-Log 'Смена отменена: локальный путь оказался сетевым.' 'ERROR'
             $apply = $false
@@ -721,7 +726,7 @@ function Invoke-MonitorCycle {
             $apply = $false
         }
     }
-    if ($apply -and $decision.Action -eq 'SwitchToNetwork' -and -not (Test-UncPathString $target)) {
+    if ($apply -and ($action -eq 'SwitchToNetwork' -or $action -eq 'ReassertNetwork') -and -not (Test-UncPathString $target)) {
         Write-Log 'Смена отменена: сетевой путь не является UNC.' 'ERROR'
         $apply = $false
     }
@@ -729,7 +734,7 @@ function Invoke-MonitorCycle {
     $didChange = $false
     if ($apply) {
         if ($preview) {
-            Write-Log ("WhatIf: рабочий стол был бы переключён на {0} ({1})." -f $target, $decision.Action)
+            Write-Log ("WhatIf: рабочий стол был бы переключён на {0} ({1})." -f $target, $action)
         } else {
             try {
                 Set-CurrentDesktopPath -Path $target
@@ -742,11 +747,14 @@ function Invoke-MonitorCycle {
     }
 
     if (-not $preview) {
-        $script:State.Mode = [string]$decision.Mode
+        $committedMode = [string]$decision.Mode
+        if ($apply -and -not $didChange) { $committedMode = $mode }
+        $script:DesktopMode = $committedMode
+        $script:State.Mode = $committedMode
         $script:State.FailureStreak = [int]$decision.FailureStreak
         $script:State.SuccessStreak = [int]$decision.SuccessStreak
         $script:State.LearnedNetworkPath = $networkPath
-        $script:State.LastAction = [string]$decision.Action
+        $script:State.LastAction = [string]$action
         $script:State.LastReason = [string]$reason
         Save-StateTable $script:State
 
@@ -769,9 +777,9 @@ function Invoke-MonitorCycle {
             }
         }
         if ($didChange) {
-            $message = Get-SwitchMessage -Action $decision.Action -ReasonCode $reason
+            $message = Get-SwitchMessage -Action $action -ReasonCode $reason
             if (-not [string]::IsNullOrWhiteSpace($message)) { Show-UserNotice -Message $message -Title 'Рабочий стол' }
-            if (($decision.Action -eq 'SwitchToLocal' -or $decision.Action -eq 'ReassertLocal') -and (Test-Path -LiteralPath $script:Cfg.LocalDesktopPath)) {
+            if (($action -eq 'SwitchToLocal' -or $action -eq 'ReassertLocal') -and (Test-Path -LiteralPath $script:Cfg.LocalDesktopPath)) {
                 $shortcutCount = @(Get-ChildItem -LiteralPath $script:Cfg.LocalDesktopPath -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '^\.(lnk|url)$' }).Count
                 if ($shortcutCount -eq 0) {
                     if ($script:Cfg.SyncShortcutsWhileOnline) {
@@ -857,6 +865,9 @@ try {
         }
         if (-not [string]::IsNullOrWhiteSpace([string]$script:Cfg.NewsJql)) {
             Write-Log ("Новости читаются из задач Jira: {0}" -f $script:Cfg.NewsJql)
+        }
+        if ($script:Cfg.HideButtonWhenOnline) {
+            Write-Log 'Кнопка скрыта, пока интернет есть. Она появится, когда интернета не станет.'
         }
         if ($script:Cfg.WidgetEnabled) {
             Start-WidgetApplication
