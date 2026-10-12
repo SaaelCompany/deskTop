@@ -66,6 +66,7 @@ $script:CloseHot = $false
 $script:DeskLayerFailed = $false
 $script:IconMissLogged = $false
 $script:LauncherColorLogged = $false
+$script:CornerLogged = $false
 $script:ConfigFile = $null
 
 $script:DesktopHostSource = @'

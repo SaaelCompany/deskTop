@@ -102,14 +102,14 @@ MSI ставится на компьютер, не на одного польз�
 msiexec /i DesktopSwitch.msi /qn /l*v C:\Windows\Temp\DesktopSwitch-install.log
 ```
 
-Код продукта этой сборки: `{C4E81F57-2A93-4B60-8D15-7F3A9C2E6B48}`. Код обновления, он не меняется между версиями: `{4048E9C4-7965-48DC-A23D-A4554966E57F}`.
+Код продукта этой сборки: `{D7A52C19-3E84-4F71-A6B0-8C1D4E9F2A35}`. Код обновления, он не меняется между версиями: `{4048E9C4-7965-48DC-A23D-A4554966E57F}`.
 
-Обнаружение для SCCM: установлен этот код продукта, либо существует `C:\Program Files\DesktopSwitch\DesktopSwitch.exe`, либо в `HKLM\Software\SaaelCompany\DesktopSwitch` значение `Version` равно `1.2.35`.
+Обнаружение для SCCM: установлен этот код продукта, либо существует `C:\Program Files\DesktopSwitch\DesktopSwitch.exe`, либо в `HKLM\Software\SaaelCompany\DesktopSwitch` значение `Version` равно `1.2.36`.
 
 Удаление:
 
 ```text
-msiexec /x {C4E81F57-2A93-4B60-8D15-7F3A9C2E6B48} /qn
+msiexec /x {D7A52C19-3E84-4F71-A6B0-8C1D4E9F2A35} /qn
 ```
 
 Чтобы заменить файлы той же версии, в том числе `config.json`:
