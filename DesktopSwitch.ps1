@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.38'
+$script:Version = '1.2.39'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -34,6 +34,8 @@ $script:MutexOwned = $false
 $script:NativeReady = $false
 $script:NativeTried = $false
 $script:BackgroundIo = $null
+$script:StartedAt = Get-Date
+$script:GraceLogged = $false
 
 $script:NativeSource = @'
 using System;
@@ -694,11 +696,17 @@ function Invoke-MonitorCycle {
     }
 
     $verdict = Get-ConnectivityVerdict -Trigger $script:Cfg.Trigger -Internet $internet -Share $share
+    $inGrace = -not (Test-StartupGraceElapsed -StartedAt $script:StartedAt -Now (Get-Date) -GraceSeconds ([int]$script:Cfg.StartupGraceSeconds))
+    if ($inGrace -and -not $script:GraceLogged) {
+        $script:GraceLogged = $true
+        Write-Log ("Первые {0} с общая папка может ещё открываться. Значок у часов скрыт, обрыв стола ошибкой не считается." -f $script:Cfg.StartupGraceSeconds)
+    }
+    $switchVerdict = Resolve-StartupVerdict -Verdict $verdict -InGrace:$inGrace
     $mode = [string]$script:State.Mode
     if ($mode -ne 'Network' -and $mode -ne 'Local') {
         $mode = Get-DesktopModeFromPath -CurrentPath $current -NetworkPath $networkPath -LocalPath $script:Cfg.LocalDesktopPath
     }
-    $decision = Update-SwitchDecision -Verdict $verdict -Mode $mode -FailureStreak ([int]$script:State.FailureStreak) -SuccessStreak ([int]$script:State.SuccessStreak) -FailuresBeforeSwitch $script:Cfg.FailuresBeforeSwitch -SuccessesBeforeRestore $script:Cfg.SuccessesBeforeRestore -RestoreWhenOnline $script:Cfg.RestoreWhenOnline
+    $decision = Update-SwitchDecision -Verdict $switchVerdict -Mode $mode -FailureStreak ([int]$script:State.FailureStreak) -SuccessStreak ([int]$script:State.SuccessStreak) -FailuresBeforeSwitch $script:Cfg.FailuresBeforeSwitch -SuccessesBeforeRestore $script:Cfg.SuccessesBeforeRestore -RestoreWhenOnline $script:Cfg.RestoreWhenOnline
     $action = Get-EffectiveSwitchAction -Action ([string]$decision.Action) -CurrentPath $current -NetworkPath $networkPath -RestoreWhenOnline $script:Cfg.RestoreWhenOnline
     $reason = Get-OfflineReasonCode -Internet $internet -Share $share
     $script:InternetStatus = [string]$internet

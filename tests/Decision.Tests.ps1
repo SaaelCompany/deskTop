@@ -241,6 +241,17 @@ $defaults = Get-EffectiveDesktopConfig ([pscustomobject]@{})
 Assert-Equal 'default disabled' $defaults.Enabled $false
 Assert-Equal 'default trigger' $defaults.Trigger 'InternetOrShare'
 Assert-Equal 'default interval' $defaults.CheckIntervalSeconds 5
+Assert-Equal 'default startup grace' $defaults.StartupGraceSeconds 12
+Assert-Equal 'grace floor' (Get-ClampedGrace -1) 0
+Assert-Equal 'grace ceiling' (Get-ClampedGrace 90) 60
+Assert-Equal 'grace kept' (Get-ClampedGrace 15) 15
+$graceStart = [datetime]::Parse('2026-10-12T09:00:00')
+Assert-True 'grace still running' (-not (Test-StartupGraceElapsed -StartedAt $graceStart -Now $graceStart.AddSeconds(11) -GraceSeconds 12))
+Assert-True 'grace elapsed' (Test-StartupGraceElapsed -StartedAt $graceStart -Now $graceStart.AddSeconds(12) -GraceSeconds 12)
+Assert-True 'zero grace is immediate' (Test-StartupGraceElapsed -StartedAt $graceStart -Now $graceStart -GraceSeconds 0)
+Assert-Equal 'grace hides an early outage' (Resolve-StartupVerdict -Verdict 'Offline' -InGrace $true) 'Unknown'
+Assert-Equal 'grace keeps a live network' (Resolve-StartupVerdict -Verdict 'Online' -InGrace $true) 'Online'
+Assert-Equal 'after grace an outage counts' (Resolve-StartupVerdict -Verdict 'Offline' -InGrace $false) 'Offline'
 Assert-Equal 'default failures' $defaults.FailuresBeforeSwitch 2
 Assert-Equal 'default successes' $defaults.SuccessesBeforeRestore 2
 Assert-Equal 'probe stays long while windows is unsure' (Get-InternetProbeTimeout -Configured 5 -WindowsInternet $null) 5
@@ -350,6 +361,7 @@ Assert-True 'example file has no jira keys' ($exampleRaw -notmatch 'JiraBaseUrl|
 Assert-True 'example file names public desktop' ($exampleRaw.Contains('C:\Users\Public\Desktop') -or $exampleRaw.Contains('C:\\Users\\Public\\Desktop'))
 Assert-Equal 'example widget on' $exampleConfig.WidgetEnabled $true
 Assert-Equal 'example button stays while online' $exampleConfig.HideButtonWhenOnline $false
+Assert-Equal 'example waits before the tray icon' $exampleConfig.StartupGraceSeconds 12
 Assert-Equal 'example emergency folder empty' $exampleConfig.EmergencyFolder ''
 $exampleErrors = Get-DesktopConfigErrors -NetworkPath $exampleConfig.NetworkDesktopPath -LocalPath $exampleConfig.LocalDesktopPath -AllowEmptyNetwork
 Assert-Equal 'example has no path error' $exampleErrors.Count 0

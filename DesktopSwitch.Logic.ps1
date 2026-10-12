@@ -410,6 +410,7 @@ function Get-EffectiveDesktopConfig {
         LocalDesktopPath = $localPath
         Trigger = $triggerMap[$triggerKey]
         CheckIntervalSeconds = Get-ClampedInterval (ConvertTo-Int (Get-Prop $Config 'CheckIntervalSeconds' 5) 5)
+        StartupGraceSeconds = Get-ClampedGrace (ConvertTo-Int (Get-Prop $Config 'StartupGraceSeconds' 12) 12)
         FailuresBeforeSwitch = Get-ClampedCount (ConvertTo-Int (Get-Prop $Config 'FailuresBeforeSwitch' 2) 2)
         SuccessesBeforeRestore = Get-ClampedCount (ConvertTo-Int (Get-Prop $Config 'SuccessesBeforeRestore' 2) 2)
         RestoreWhenOnline = ConvertTo-Bool (Get-Prop $Config 'RestoreWhenOnline' $true) $true
@@ -903,6 +904,33 @@ function Test-ReparseAttribute {
     param([int]$Attributes)
     $reparse = [int][System.IO.FileAttributes]::ReparsePoint
     return (($Attributes -band $reparse) -ne 0)
+}
+
+function Get-ClampedGrace {
+    param([int]$Seconds)
+    if ($Seconds -lt 0) { return 0 }
+    if ($Seconds -gt 60) { return 60 }
+    return $Seconds
+}
+
+function Test-StartupGraceElapsed {
+    param(
+        [datetime]$StartedAt,
+        [datetime]$Now,
+        [int]$GraceSeconds
+    )
+    if ($GraceSeconds -le 0) { return $true }
+    return ($Now - $StartedAt).TotalSeconds -ge $GraceSeconds
+}
+
+function Resolve-StartupVerdict {
+    param(
+        [ValidateSet('Online', 'Offline', 'Unknown')]
+        [string]$Verdict,
+        [bool]$InGrace
+    )
+    if ($InGrace -and $Verdict -eq 'Offline') { return 'Unknown' }
+    return $Verdict
 }
 
 function Test-CooldownElapsed {

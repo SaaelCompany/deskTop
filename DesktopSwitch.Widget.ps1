@@ -35,6 +35,7 @@ $script:DesktopVerdict = ''
 $script:InternetStatus = ''
 $script:LastLauncherVisible = $null
 $script:LauncherMenuSync = $false
+$script:TrayRevealTimer = $null
 $script:JiraDesks = @()
 $script:JiraRequestTypes = @()
 $script:JiraLoaded = $false
@@ -428,19 +429,24 @@ public static class DeskLayer {
         return ok;
     }
 
-    public static Icon MakeChatIcon(int fillArgb) {
+    public static Icon MakeTrayIcon() {
         const int size = 32;
-        Color fill = Color.FromArgb(fillArgb);
-        Color accent = Color.FromArgb(255, fill.R, fill.G, fill.B);
+        Color fill = Color.FromArgb(255, 100, 116, 139);
         Bitmap bmp = new Bitmap(size, size, PixelFormat.Format32bppArgb);
         using (Graphics g = Graphics.FromImage(bmp)) {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
             g.Clear(Color.Transparent);
-            using (SolidBrush brush = new SolidBrush(accent)) {
+            using (SolidBrush brush = new SolidBrush(fill)) {
                 g.FillEllipse(brush, 0.5f, 0.5f, 31f, 31f);
             }
-            DrawExclamation(g, size);
+            using (Pen pen = new Pen(Color.White, 1.7f)) {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                g.DrawRectangle(pen, 8.5f, 7.5f, 15f, 11f);
+                g.DrawLine(pen, 16f, 18.5f, 16f, 22f);
+                g.DrawLine(pen, 12f, 22f, 20f, 22f);
+            }
         }
         IntPtr handle = IntPtr.Zero;
         try {
@@ -906,9 +912,7 @@ function Update-TrayIconImage {
     $owned = $false
     if (Initialize-DeskLayer) {
         try {
-            $accent = Get-LauncherFill
-            $color = [System.Drawing.Color]::FromArgb(255, [int]$accent.R, [int]$accent.G, [int]$accent.B)
-            $fresh = [DeskLayer]::MakeChatIcon($color.ToArgb())
+            $fresh = [DeskLayer]::MakeTrayIcon()
             $owned = $null -ne $fresh
         } catch {
             $fresh = $null
@@ -3053,8 +3057,8 @@ function Ensure-TrayIcon {
     if ($script:TrayIcon) { return }
     $icon = New-Object System.Windows.Forms.NotifyIcon
     $icon.Icon = [System.Drawing.SystemIcons]::Application
-    $icon.Text = 'Аварийная папка'
-    $icon.Visible = $true
+    $icon.Text = 'Рабочий стол'
+    $icon.Visible = $false
     $script:TrayIconOwned = $false
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
     if ($script:TabFont) { $menu.Font = $script:TabFont }
@@ -3125,10 +3129,40 @@ function Ensure-TrayIcon {
     $script:TrayIcon = $icon
     Apply-TrayMenuPalette
     $icon.Add_DoubleClick({ Open-EmergencyFolder })
+    Start-TrayReveal
+}
+
+function Show-TrayIcon {
+    if ($script:TrayIcon) { $script:TrayIcon.Visible = $true }
+}
+
+function Start-TrayReveal {
+    if ($script:TrayRevealTimer) { return }
+    $seconds = 12
+    if ($script:Cfg -and $script:Cfg.PSObject.Properties['StartupGraceSeconds']) {
+        $seconds = [int]$script:Cfg.StartupGraceSeconds
+    }
+    if ($seconds -le 0) {
+        Show-TrayIcon
+        return
+    }
+    $script:TrayRevealTimer = New-Object System.Windows.Forms.Timer
+    $script:TrayRevealTimer.Interval = [Math]::Max(1000, $seconds * 1000)
+    $script:TrayRevealTimer.Add_Tick({
+        try { $script:TrayRevealTimer.Stop() } catch { }
+        Show-TrayIcon
+        Write-Log 'Значок у часов показан.'
+    })
+    $script:TrayRevealTimer.Start()
 }
 
 function Stop-DesktopWidgetApp {
     Unregister-ThemeChanges
+    if ($script:TrayRevealTimer) {
+        try { $script:TrayRevealTimer.Stop() } catch { }
+        try { $script:TrayRevealTimer.Dispose() } catch { }
+        $script:TrayRevealTimer = $null
+    }
     $script:AllowExit = $true
     if ($script:NewsPopup -and -not $script:NewsPopup.IsDisposed) { $script:NewsPopup.Close() }
     if ($script:PanelForm -and -not $script:PanelForm.IsDisposed) { $script:PanelForm.Close() }
