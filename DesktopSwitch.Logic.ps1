@@ -409,6 +409,7 @@ function Get-EffectiveDesktopConfig {
         WidgetOpacity = Resolve-WidgetOpacity (Get-Prop $widget 'Opacity' $null) $widgetColorText
         WidgetCorner = $cornerMap[$cornerKey]
         WidgetMargin = Get-ClampedMargin (ConvertTo-Int (Get-Prop $widget 'Margin' 16) 16)
+        EmergencyFolder = ConvertTo-ExpandedPath ([string](Get-Prop $Config 'EmergencyFolder' ''))
         ServiceDeskUrl = $serviceDeskUrl
         ServiceDeskApiUrl = $serviceDeskApi
         ServiceDeskToken = ([string](Get-Prop $widget 'ServiceDeskToken' '')).Trim()
@@ -503,6 +504,34 @@ function Select-SingleHttpUrl {
     $clean = Select-HttpProbeUrl -Urls @([string]$Url)
     if ($clean.Count -eq 0) { return '' }
     return [string]$clean[0]
+}
+
+function Set-WindowsRequestAuth {
+    param($Request)
+    if ($null -eq $Request) { return }
+    $Request.UseDefaultCredentials = $false
+    $Request.PreAuthenticate = $false
+    $uri = $null
+    try { $uri = $Request.RequestUri } catch { $uri = $null }
+    $cache = New-Object System.Net.CredentialCache
+    $creds = [System.Net.CredentialCache]::DefaultNetworkCredentials
+    $added = $false
+    if ($null -ne $uri) {
+        $originText = ''
+        try { $originText = $uri.GetLeftPart([System.UriPartial]::Authority) } catch { $originText = '' }
+        if (-not [string]::IsNullOrWhiteSpace($originText)) {
+            $origin = New-Object System.Uri ($originText.TrimEnd('/') + '/')
+            $cache.Add($origin, 'Negotiate', $creds)
+            $cache.Add($origin, 'NTLM', $creds)
+            $added = $true
+        }
+    }
+    if ($added) { $Request.Credentials = $cache }
+    else { $Request.UseDefaultCredentials = $true }
+    if ($null -eq $script:JiraCookies) {
+        $script:JiraCookies = New-Object System.Net.CookieContainer
+    }
+    $Request.CookieContainer = $script:JiraCookies
 }
 
 function Resolve-ServiceDeskProvider {

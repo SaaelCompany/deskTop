@@ -2056,30 +2056,20 @@ function Update-TicketActions {
 function Apply-SupportPageVisual {
     param([string]$Page)
     if ($null -eq $script:WidgetUi) { return }
-    if ($Page -ne 'News') { $Page = 'Ticket' }
-    $script:WidgetPage = $Page
+    $script:WidgetPage = 'Ticket'
     $ui = $script:WidgetUi
-    $newsOn = $Page -eq 'News'
-    $ui.NewsPage.Visible = $newsOn
-    $ui.TicketPage.Visible = -not $newsOn
+    if ($ui.NewsPage) { $ui.NewsPage.Visible = $false }
+    $ui.TicketPage.Visible = $true
     $ink = Get-ThemeColor Ink
-    $muted = Get-ThemeColor Muted
-    if ($newsOn) {
-        $ui.NewsTab.ForeColor = $ink
-        $ui.TicketTab.ForeColor = $muted
-        $ui.NewsTab.Font = $script:TabFontBold
-        $ui.TicketTab.Font = $script:TabFont
-        Update-SupportTabLine -News
-    } else {
-        $ui.NewsTab.ForeColor = $muted
-        $ui.TicketTab.ForeColor = $ink
-        $ui.NewsTab.Font = $script:TabFont
-        $ui.TicketTab.Font = $script:TabFontBold
-        Update-SupportTabLine
-        $session = Get-WindowsSessionIdentity
-        $ui.LoginBox.Text = Format-WindowsAccount ([string]$session.Login)
-        $ui.ComputerBox.Text = [string]$session.Computer
-    }
+    $ui.NewsTab.Text = 'Аварийная папка'
+    $ui.NewsTab.ForeColor = $ink
+    $ui.NewsTab.Font = $script:TabFont
+    $ui.TicketTab.ForeColor = $ink
+    $ui.TicketTab.Font = $script:TabFontBold
+    Update-SupportTabLine
+    $session = Get-WindowsSessionIdentity
+    $ui.LoginBox.Text = Format-WindowsAccount ([string]$session.Login)
+    $ui.ComputerBox.Text = [string]$session.Computer
 }
 
 function Update-SupportTabLine {
@@ -2096,9 +2086,7 @@ function Update-SupportTabLine {
 
 function Select-SupportPage {
     param([string]$Page)
-    Apply-SupportPageVisual -Page $Page
-    if ($script:WidgetPage -eq 'News') { Enter-NewsReading }
-    else { Leave-NewsReading }
+    Apply-SupportPageVisual -Page 'Ticket'
 }
 
 function Update-WidgetChrome {
@@ -2115,7 +2103,7 @@ function Update-WidgetChrome {
     $ui.Identity.Visible = $false
     $ui.LoginBox.Text = $login
     $ui.ComputerBox.Text = $computer
-    $ui.NewsTab.Text = 'Новости'
+    $ui.NewsTab.Text = 'Аварийная папка'
     $signature = Get-NewsSignature
     if ($null -eq $script:NewsSignature -or $signature -ne $script:NewsSignature) {
         Update-NewsRows
@@ -2417,7 +2405,7 @@ function New-SupportPanel {
         }
     })
     $newsTab = New-Object System.Windows.Forms.Button
-    $newsTab.Text = 'Новости'
+    $newsTab.Text = 'Аварийная папка'
     $newsTab.SetBounds($half, 0, ($panelW - $half), 32)
     $newsTab.TextAlign = 'MiddleCenter'
     $newsTab.Padding = New-Object System.Windows.Forms.Padding(0)
@@ -2425,10 +2413,10 @@ function New-SupportPanel {
     $newsTab.FlatAppearance.BorderSize = 0
     $newsTab.FlatAppearance.MouseOverBackColor = $hover
     $newsTab.BackColor = $headerColor
-    $newsTab.ForeColor = $muted
+    $newsTab.ForeColor = $ink
     $newsTab.Font = $script:TabFont
     $newsTab.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $newsTab.Add_Click({ Select-SupportPage -Page News })
+    $newsTab.Add_Click({ Open-EmergencyFolder })
     $tabLine = New-Object System.Windows.Forms.Panel
     $tabLine.BackColor = $accent
     $tabLine.SetBounds(58, 30, 64, 2)
@@ -2719,8 +2707,7 @@ function Start-JiraWorker {
             if (-not [string]::IsNullOrWhiteSpace($Bearer)) {
                 $request.Headers.Add('Authorization', 'Bearer ' + $Bearer)
             } else {
-                $request.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
-                $request.PreAuthenticate = $true
+                Set-WindowsRequestAuth -Request $request
             }
             $response = $null
             $reader = $null
@@ -3069,7 +3056,7 @@ function Ensure-TrayIcon {
     $ticketItem.Text = 'Заявка'
     $ticketItem.Padding = $itemPad
     $newsItem = New-Object System.Windows.Forms.ToolStripMenuItem
-    $newsItem.Text = 'Новости'
+    $newsItem.Text = 'Аварийная папка'
     $newsItem.Padding = $itemPad
     [void]$menu.Items.Add($openItem)
     [void]$menu.Items.Add($ticketItem)
@@ -3099,7 +3086,7 @@ function Ensure-TrayIcon {
     }
     $openItem.Add_Click({ Show-SupportPanel -Page $script:WidgetPage })
     $ticketItem.Add_Click({ Show-SupportPanel -Page Ticket })
-    $newsItem.Add_Click({ Show-SupportPanel -Page News })
+    $newsItem.Add_Click({ Open-EmergencyFolder })
     $buttonItem.Add_Click({
         $show = [bool]$script:LauncherMenuItem.Checked
         if ($script:State) {
@@ -3489,8 +3476,11 @@ function Invoke-ServiceDeskRequest {
         if (-not [string]::IsNullOrWhiteSpace($token)) {
             $request.Headers.Add('Authorization', 'Bearer ' + $token)
         } else {
-            $request.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
-            $request.PreAuthenticate = $true
+            Set-WindowsRequestAuth -Request $request
+            if (-not $script:WindowsAuthLogged) {
+                $script:WindowsAuthLogged = $true
+                Write-Log 'Jira: вход текущей учётной записью Windows (Negotiate). Адрес должен быть именем сервера, не IP.'
+            }
         }
         if ($verb -eq 'POST') {
             $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$JsonBody)
@@ -3519,6 +3509,11 @@ function Invoke-ServiceDeskRequest {
             try { $errorResponse.Close() } catch { }
         }
         if ([string]::IsNullOrWhiteSpace($detail)) { $detail = [string]$_.Exception.Message }
+        $statusCode = 0
+        try { if ($null -ne $errorResponse) { $statusCode = [int]$errorResponse.StatusCode } } catch { $statusCode = 0 }
+        if ($statusCode -eq 401 -and [string]::IsNullOrWhiteSpace($token)) {
+            $detail = $detail + ' Вход Windows не принят. JiraBaseUrl должен быть именем сервера, не IP-адресом, а REST API должен разрешать Negotiate.'
+        }
         throw $detail
     } finally {
         if ($null -ne $reader) { $reader.Close() }
@@ -3580,13 +3575,29 @@ function Show-TicketDialog {
     Show-SupportPanel -Page Ticket
 }
 
+function Open-EmergencyFolder {
+    $path = ''
+    if ($script:Cfg) { $path = [string]$script:Cfg.EmergencyFolder }
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        Set-TicketStatusMessage -Text 'В config.json не указана EmergencyFolder.' -IsError $true
+        Show-SupportPanel -Page Ticket
+        return
+    }
+    if (-not (Test-Path -LiteralPath $path)) {
+        Set-TicketStatusMessage -Text ('Папка не найдена: ' + $path) -IsError $true
+        Show-SupportPanel -Page Ticket
+        return
+    }
+    Write-Log ("Открываю аварийную папку {0}." -f $path)
+    Start-Process -FilePath 'explorer.exe' -ArgumentList @($path)
+}
+
 function Start-WidgetApplication {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
     [System.Windows.Forms.Application]::EnableVisualStyles()
     $script:WidgetContext = New-Object System.Windows.Forms.ApplicationContext
     try { Invoke-MonitorCycle } catch { Write-Log ("Сбой цикла: {0}" -f $_.Exception.Message) 'ERROR' }
-    try { Update-WidgetNews } catch { Write-Log ("Сбой новостей: {0}" -f $_.Exception.Message) 'ERROR' }
     try { Ensure-DesktopWidget } catch {
         Write-Log ("Сбой виджета: {0}" -f $_.Exception.ToString()) 'ERROR'
         throw
@@ -3595,7 +3606,6 @@ function Start-WidgetApplication {
     $timer.Interval = [Math]::Max(5000, ([int]$script:Cfg.CheckIntervalSeconds * 1000))
     $timer.Add_Tick({
         try { Invoke-MonitorCycle } catch { Write-Log ("Сбой цикла: {0}" -f $_.Exception.Message) 'ERROR' }
-        try { Update-WidgetNews } catch { Write-Log ("Сбой новостей: {0}" -f $_.Exception.Message) 'ERROR' }
         try { Ensure-DesktopWidget } catch { Write-Log ("Сбой виджета: {0}" -f $_.Exception.Message) 'ERROR' }
     })
     $timer.Start()

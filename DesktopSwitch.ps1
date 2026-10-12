@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.30'
+$script:Version = '1.2.31'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -249,8 +249,12 @@ function Set-DesktopRegistryPath {
 function Set-CurrentDesktopPath {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { throw 'Пустой путь рабочего стола.' }
-    if (-not (Test-Path -LiteralPath $Path)) {
-        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    # A UNC desktop already exists on the server. Creating it from here can hang or
+    # throw, and then the shell path is never written back.
+    if (-not (Test-UncPathString $Path)) {
+        if (-not (Test-Path -LiteralPath $Path)) {
+            New-Item -ItemType Directory -Path $Path -Force | Out-Null
+        }
     }
     Set-DesktopRegistryPath -Path $Path
     if (Initialize-DesktopNative) {
@@ -272,13 +276,25 @@ function Test-BackgroundIoBusy {
 }
 
 function Start-BackgroundIo {
-    param([string]$Code, [object[]]$Arguments)
+    param([string]$Code, [object[]]$Arguments, [string]$Kind)
+    if ([string]::IsNullOrWhiteSpace($Kind)) { $Kind = 'probe' }
     $ps = [powershell]::Create()
     $null = $ps.AddScript($Code)
     foreach ($argument in $Arguments) { $null = $ps.AddArgument($argument) }
     $handle = $ps.BeginInvoke()
-    $script:BackgroundIo = @{ Shell = $ps; Handle = $handle }
+    $script:BackgroundIo = @{ Shell = $ps; Handle = $handle; Kind = $Kind; Started = Get-Date }
     return $handle
+}
+
+function Release-StaleBackgroundIo {
+    param([int]$LimitSec)
+    if ($null -eq $script:BackgroundIo) { return }
+    if ($script:BackgroundIo.Handle.IsCompleted) { return }
+    $started = $script:BackgroundIo.Started
+    if ($null -eq $started) { return }
+    if (((Get-Date) - [datetime]$started).TotalSeconds -lt $LimitSec) { return }
+    Write-Log 'Проверка общей папки зависла и больше не блокирует возврат на сетевой стол.' 'WARN'
+    $script:BackgroundIo = $null
 }
 
 function Wait-BackgroundIo {
@@ -324,12 +340,21 @@ function Test-TcpPort {
 
 function Get-ShareStatus {
     param([string]$UncPath, [int]$TimeoutSec)
-    if (Test-BackgroundIoBusy) { return 'Down' }
+    $limit = $TimeoutSec * 2
+    if ($limit -lt 12) { $limit = 12 }
+    Release-StaleBackgroundIo -LimitSec $limit
+    if (Test-BackgroundIoBusy) {
+        $kind = ''
+        try { $kind = [string]$script:BackgroundIo.Kind } catch { $kind = '' }
+        # Copying shortcuts means the share was reachable. A probe still in flight is not proof that it is down.
+        if ($kind -eq 'sync') { return 'Up' }
+        return 'Unknown'
+    }
     if (-not (Test-UncPathString $UncPath)) { return 'Unknown' }
     $server = Get-UncHost $UncPath
     if ([string]::IsNullOrWhiteSpace($server)) { return 'Down' }
     if (-not (Test-TcpPort -HostName $server -Port 445 -TimeoutSec $TimeoutSec)) { return 'Down' }
-    Start-BackgroundIo -Code 'param($p) [System.IO.Directory]::Exists($p)' -Arguments @($UncPath) | Out-Null
+    Start-BackgroundIo -Code 'param($p) [System.IO.Directory]::Exists($p)' -Arguments @($UncPath) -Kind 'probe' | Out-Null
     $wait = Wait-BackgroundIo -TimeoutSec $TimeoutSec
     if ($wait.TimedOut -or $wait.Value -ne $true) { return 'Down' }
     return 'Up'
@@ -417,7 +442,7 @@ function Invoke-ShortcutSync {
     $timeout = $script:Cfg.ShareProbeTimeoutSeconds * 3
     if ($timeout -lt 10) { $timeout = 10 }
     if ($timeout -gt 30) { $timeout = 30 }
-    Start-BackgroundIo -Code $script:SyncCode -Arguments @($Source, $Destination, $script:Cfg.SyncExtensions) | Out-Null
+    Start-BackgroundIo -Code $script:SyncCode -Arguments @($Source, $Destination, $script:Cfg.SyncExtensions) -Kind 'sync' | Out-Null
     $wait = Wait-BackgroundIo -TimeoutSec $timeout
     if ($wait.TimedOut) {
         Write-Log 'Копирование ярлыков прервано по таймауту. Сетевая папка считается недоступной до завершения операции.' 'WARN'
@@ -706,9 +731,13 @@ function Invoke-MonitorCycle {
         if ($preview) {
             Write-Log ("WhatIf: рабочий стол был бы переключён на {0} ({1})." -f $target, $decision.Action)
         } else {
-            Set-CurrentDesktopPath -Path $target
-            $didChange = $true
-            Write-Log ("Рабочий стол переключён на {0}." -f $target)
+            try {
+                Set-CurrentDesktopPath -Path $target
+                $didChange = $true
+                Write-Log ("Рабочий стол переключён на {0}." -f $target)
+            } catch {
+                Write-Log ("Не удалось переключить рабочий стол на {0}: {1}" -f $target, $_.Exception.Message) 'ERROR'
+            }
         }
     }
 
@@ -816,6 +845,11 @@ try {
             Write-Log ("Ярлыки копируются в {0}, пока общая папка доступна." -f $script:Cfg.LocalDesktopPath)
         } else {
             Write-Log ("Копирование ярлыков выключено. При обрыве стол переключится на готовую папку {0}." -f $script:Cfg.LocalDesktopPath)
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$script:Cfg.EmergencyFolder)) {
+            Write-Log 'Аварийная папка не задана. Укажите EmergencyFolder в config.json.'
+        } else {
+            Write-Log ("Аварийная папка: {0}." -f $script:Cfg.EmergencyFolder)
         }
         if (-not [string]::IsNullOrWhiteSpace([string]$script:Cfg.NewsJql)) {
             Write-Log ("Новости читаются из задач Jira: {0}" -f $script:Cfg.NewsJql)

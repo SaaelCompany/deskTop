@@ -293,6 +293,7 @@ $exampleConfig = Get-EffectiveDesktopConfig $example
 Assert-Equal 'example stays disabled' $exampleConfig.Enabled $false
 Assert-Equal 'example follows policy' $exampleConfig.NetworkDesktopPath ''
 Assert-Equal 'example widget on' $exampleConfig.WidgetEnabled $true
+Assert-Equal 'example emergency folder empty' $exampleConfig.EmergencyFolder ''
 $exampleErrors = Get-DesktopConfigErrors -NetworkPath $exampleConfig.NetworkDesktopPath -LocalPath $exampleConfig.LocalDesktopPath -AllowEmptyNetwork
 Assert-Equal 'example has no path error' $exampleErrors.Count 0
 $placeholderErrors = Get-DesktopConfigErrors -NetworkPath '\\CHANGE-ME\DesktopShare\Desktop' -LocalPath $exampleConfig.LocalDesktopPath
