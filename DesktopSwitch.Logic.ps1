@@ -359,12 +359,30 @@ function Get-EffectiveDesktopConfig {
     }
 
     $widget = Get-Prop $Config 'Widget' $null
-    $cornerRaw = ([string](Get-Prop $widget 'Corner' 'BottomRight')).Trim().ToLowerInvariant()
+    $cornerRaw = ([string](Get-Prop $widget 'Corner' '')).Trim().ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($cornerRaw)) {
+        $cornerRaw = ([string](Get-Prop $Config 'Corner' 'BottomRight')).Trim().ToLowerInvariant()
+    }
     $cornerMap = @{
         'bottomright' = 'BottomRight'
         'bottomleft' = 'BottomLeft'
         'topright' = 'TopRight'
         'topleft' = 'TopLeft'
+        'bottom' = 'BottomRight'
+        'down' = 'BottomRight'
+        'low' = 'BottomRight'
+        'низ' = 'BottomRight'
+        'вниз' = 'BottomRight'
+        'внизу' = 'BottomRight'
+        'снизу' = 'BottomRight'
+        'справа' = 'BottomRight'
+        'left' = 'BottomLeft'
+        'слева' = 'BottomLeft'
+        'top' = 'TopRight'
+        'up' = 'TopRight'
+        'верх' = 'TopRight'
+        'сверху' = 'TopRight'
+        'вверх' = 'TopRight'
     }
     $cornerKey = 'bottomright'
     if ($cornerMap.ContainsKey($cornerRaw)) { $cornerKey = $cornerRaw }

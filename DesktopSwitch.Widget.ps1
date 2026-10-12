@@ -1243,6 +1243,10 @@ function Set-SupportBounds {
     if ($corner -eq 'BottomRight' -or $corner -eq 'BottomLeft') { $y = $screen.Bottom - $button - $margin }
     if ($script:WidgetForm -and -not $script:WidgetForm.IsDisposed) {
         $script:WidgetForm.Location = New-Object System.Drawing.Point($x, $y)
+        if (-not $script:CornerLogged) {
+            $script:CornerLogged = $true
+            Write-Log ("Кнопка: угол {0}, точка {1},{2}." -f $corner, $x, $y)
+        }
     }
     $px = $x + $button - $panelW
     $py = $y - $gap - $panelH
@@ -2998,6 +3002,7 @@ function New-DesktopWidget {
     $script:PanelForm = $null
     $launcher = New-LauncherButton
     $script:WidgetForm = $launcher
+    Set-SupportBounds
     Ensure-TrayIcon
     Register-ThemeChanges
     Set-LauncherChrome
@@ -3009,6 +3014,7 @@ function New-DesktopWidget {
 
 function Ensure-DesktopWidget {
     if ($script:WidgetForm -and -not $script:WidgetForm.IsDisposed -and $script:WidgetForm.IsHandleCreated) {
+        Set-SupportBounds
         Update-LauncherSurface
         return
     }

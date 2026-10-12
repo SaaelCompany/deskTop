@@ -408,6 +408,12 @@ Assert-Equal 'poll floor' $widgetCfg.NewsPollMinutes 1
 Assert-Equal 'news poll ignores ten minutes' (Get-NewsPollSeconds 10) 20
 Assert-Equal 'news poll stays short' (Get-NewsPollSeconds 1) 20
 Assert-Equal 'corner fallback' $widgetCfg.WidgetCorner 'BottomRight'
+$downCorner = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ Corner = 'вниз' } })
+Assert-Equal 'corner down' $downCorner.WidgetCorner 'BottomRight'
+$rootCorner = Get-EffectiveDesktopConfig ([pscustomobject]@{ Corner = 'TopLeft' })
+Assert-Equal 'root corner' $rootCorner.WidgetCorner 'TopLeft'
+$topCorner = Get-EffectiveDesktopConfig ([pscustomobject]@{ Widget = [pscustomobject]@{ Corner = 'TopRight' } })
+Assert-Equal 'corner top right' $topCorner.WidgetCorner 'TopRight'
 Assert-Equal 'widget can be disabled' $widgetCfg.WidgetEnabled $false
 Assert-Equal 'preview off by default' $widgetCfg.Preview $false
 $previewCfg = Get-EffectiveDesktopConfig ([pscustomobject]@{ Preview = $true; Enabled = $true })
