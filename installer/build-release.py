@@ -9,8 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = Path(__file__).resolve().parent
-VERSION = "1.2.36"
-PRODUCT_CODE = "{D7A52C19-3E84-4F71-A6B0-8C1D4E9F2A35}"
+VERSION = "1.2.37"
+PRODUCT_CODE = "{E8B63D24-5F17-4A82-9C30-1D7E4B8A6F52}"
 UPGRADE_CODE = "{4048E9C4-7965-48DC-A23D-A4554966E57F}"
 
 
@@ -93,7 +93,7 @@ def sccm_config(example: Path, destination: Path):
         if needle not in text:
             raise SystemExit("config.example.json has no Enabled false switch")
         text = text.replace(needle, '"Enabled": true', 1)
-        note = "// Файл пакета SCCM. Enabled включён. Перед раздачей впишите JiraBaseUrl. Токен оставьте пустым для входа Windows.\n"
+        note = "// Файл пакета SCCM. Enabled включён. LocalDesktopPath — C:\\Users\\Public\\Desktop. EmergencyFolder заполните перед раздачей.\n"
         if not text.startswith(note):
             text = note + text
         data = b"\xef\xbb\xbf" + text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")

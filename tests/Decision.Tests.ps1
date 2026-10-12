@@ -300,6 +300,11 @@ $exampleConfig = Get-EffectiveDesktopConfig $example
 Assert-Equal 'example stays disabled' $exampleConfig.Enabled $false
 Assert-Equal 'example preview off' $exampleConfig.Preview $false
 Assert-Equal 'example follows policy' $exampleConfig.NetworkDesktopPath ''
+Assert-Equal 'example local is public desktop' $exampleConfig.LocalDesktopPath 'C:\Users\Public\Desktop'
+Assert-Equal 'example has no jira url' $exampleConfig.JiraBaseUrl ''
+$exampleRaw = Get-Content -LiteralPath (Join-Path $root 'config.example.json') -Raw -Encoding UTF8
+Assert-True 'example file has no jira keys' ($exampleRaw -notmatch 'JiraBaseUrl|ServiceDesk|NewsJql')
+Assert-True 'example file names public desktop' ($exampleRaw.Contains('C:\Users\Public\Desktop') -or $exampleRaw.Contains('C:\\Users\\Public\\Desktop'))
 Assert-Equal 'example widget on' $exampleConfig.WidgetEnabled $true
 Assert-Equal 'example emergency folder empty' $exampleConfig.EmergencyFolder ''
 $exampleErrors = Get-DesktopConfigErrors -NetworkPath $exampleConfig.NetworkDesktopPath -LocalPath $exampleConfig.LocalDesktopPath -AllowEmptyNetwork

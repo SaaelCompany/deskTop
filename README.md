@@ -94,7 +94,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-DesktopSwitch.
 
 MSI ставится на компьютер, не на одного пользователя. Установка от SYSTEM не запускает монитор в сеансе 0. Автозапуск записан в `HKLM\Software\Microsoft\Windows\CurrentVersion\Run`: кнопка и переключение стола появляются при входе сотрудника. Установщик не кладёт ярлык в папку автозагрузки и не зависит от домашней папки пользователя. Перед копированием файлов он завершает уже запущенный `DesktopSwitch.exe` и снимает старый `DesktopSwitch.vbs` из общей автозагрузки. Ярлык в автозагрузке одного пользователя, если он был создан без `-AllUsers`, эта установка не ищет: его снимает `Uninstall-DesktopSwitch.ps1` в сеансе этого пользователя.
 
-В пакет уже входит `config.json` с `Enabled` равным `true` и пустым `NetworkDesktopPath`: путь общего стола читается из политики. Адрес Jira в этом файле пустой. Перед массовой раздачей впишите свой `JiraBaseUrl` и при необходимости `NewsJql`, затем соберите MSI заново скриптом `installer/build-release.py`. Токен оставьте пустым, если на проде вход идёт учётной записью Windows. Повторная установка той же или более новой версии заменяет `config.json` файлом из пакета.
+В пакет уже входит `config.json` с `Enabled` равным `true`, пустым `NetworkDesktopPath` и `LocalDesktopPath` равным `C:\Users\Public\Desktop`. Заявок и адреса Jira в этом файле нет. Перед раздачей можно вписать `EmergencyFolder` и собрать MSI заново скриптом `installer/build-release.py`. Повторная установка той же или более новой версии заменяет `config.json` файлом из пакета.
 
 Тихая установка:
 
@@ -102,14 +102,14 @@ MSI ставится на компьютер, не на одного польз�
 msiexec /i DesktopSwitch.msi /qn /l*v C:\Windows\Temp\DesktopSwitch-install.log
 ```
 
-Код продукта этой сборки: `{D7A52C19-3E84-4F71-A6B0-8C1D4E9F2A35}`. Код обновления, он не меняется между версиями: `{4048E9C4-7965-48DC-A23D-A4554966E57F}`.
+Код продукта этой сборки: `{E8B63D24-5F17-4A82-9C30-1D7E4B8A6F52}`. Код обновления, он не меняется между версиями: `{4048E9C4-7965-48DC-A23D-A4554966E57F}`.
 
-Обнаружение для SCCM: установлен этот код продукта, либо существует `C:\Program Files\DesktopSwitch\DesktopSwitch.exe`, либо в `HKLM\Software\SaaelCompany\DesktopSwitch` значение `Version` равно `1.2.36`.
+Обнаружение для SCCM: установлен этот код продукта, либо существует `C:\Program Files\DesktopSwitch\DesktopSwitch.exe`, либо в `HKLM\Software\SaaelCompany\DesktopSwitch` значение `Version` равно `1.2.37`.
 
 Удаление:
 
 ```text
-msiexec /x {D7A52C19-3E84-4F71-A6B0-8C1D4E9F2A35} /qn
+msiexec /x {E8B63D24-5F17-4A82-9C30-1D7E4B8A6F52} /qn
 ```
 
 Чтобы заменить файлы той же версии, в том числе `config.json`:
@@ -120,7 +120,7 @@ msiexec /i DesktopSwitch.msi /qn REINSTALL=ALL REINSTALLMODE=amus
 
 Следующая версия программы должна получить новый код продукта и больший номер версии. Код обновления остаётся прежним: тогда Windows Installer сам снимет старую копию.
 
-Журналы в `%LOCALAPPDATA%\DesktopSwitch` и локальные копии ярлыков при удалении остаются. Пользователям достаточно чтения `C:\Program Files\DesktopSwitch`: общий ключ helpdesk в `config.json` они менять не должны. После установки уже вошедшему сотруднику нужен повторный вход, чтобы сработала автозагрузка. До этого ярлык можно запустить вручную: `C:\Program Files\DesktopSwitch\DesktopSwitch.exe`.
+Журналы в `%LOCALAPPDATA%\DesktopSwitch` и локальные копии ярлыков при удалении остаются. Пользователям достаточно чтения `C:\Program Files\DesktopSwitch`: `config.json` компании они менять не должны. После установки уже вошедшему сотруднику нужен повторный вход, чтобы сработала автозагрузка. До этого программу можно запустить вручную: `C:\Program Files\DesktopSwitch\DesktopSwitch.exe`.
 
 Состояние без установки смотрит `Show-DesktopSwitchStatus.cmd` или `DesktopSwitch.exe -Status`.
 
@@ -145,16 +145,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ProgramFiles%\DesktopS
 | `SuccessesBeforeRestore` | 2 | Сколько успешных проверок подряд нужно, чтобы вернуть сетевой стол |
 | `RestoreWhenOnline` | true | Возвращать сетевой путь после восстановления связи |
 | `RestartExplorer` | true | Перезапускать Проводник, иначе новый путь виден только после повторного входа |
-| `NotifyUser` | true | Показывать уведомление о смене стола, новостях и работах |
+| `NotifyUser` | true | Показывать уведомление о смене стола |
 | `Widget.Enabled` | true | Круглая кнопка в углу экрана. `false` оставляет только фоновый монитор |
 | `Widget.Icon` | пусто | Картинка внутри круглой кнопки: png или ico. Путь абсолютный либо относительно папки `config.json`, затем папки скрипта. Пустое значение оставляет белый восклицательный знак. Файл читается при запуске |
 | `Widget.Color` | пусто | Цвет круглой кнопки: `#1F6B4A` или с прозрачностью `#1F6B4A80` (последние две цифры — альфа). Пустое значение оставляет красный `#DC2626` |
 | `Widget.Opacity` | 100 | Непрозрачность фона круга, от 0 до 100. Значок остаётся сплошным. 100 — сплошной фон, 40 — фон просвечивает, 0 — круга нет, виден только значок. Дробь `0.4` значит то же, что 40. Если Opacity не задан, берётся альфа из `Color` |
-| `Widget.NewsJql` | пусто | Запрос Jira для новостей, например `labels = desktop-news ORDER BY updated DESC`. Пусто — задачи Jira в ленту не попадают |
-| `Widget.NewsToken` | пусто | Одна техническая учётка в этом файле, не список людей в заявке. Пусто — та же учётка, что и у заявок |
-| `Widget.NewsUrl` | пусто | Запасной адрес JSON или RSS. Пусто — эта лента не используется |
-| `Widget.NewsPollMinutes` | 10 | На паузу новостей больше не влияет: программа спрашивает Jira каждые 20 секунд |
 | `Widget.Corner` | BottomRight | Угол: BottomRight, BottomLeft, TopRight, TopLeft |
+| `LocalDesktopPath` | `C:\Users\Public\Desktop` | Папка, которая становится рабочим столом при обрыве |
+| `EmergencyFolder` | пусто | Папка, которую открывает красная кнопка |
 | `SyncShortcutsWhileOnline` | false | `false` ничего не копирует: при обрыве открывается `C:\Users\Public\Desktop`. `true` копирует ярлыки с общей папки, пока она доступна |
 | `SyncExtensions` | `.lnk`, `.url` | Какие файлы копировать. Остальные файлы общей папки не копируются |
 | `InternetCheck.ProbeUrls` | адрес проверки связи Microsoft | Свои адреса, например `https://intranet.company.local/health` |
@@ -167,9 +165,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ProgramFiles%\DesktopS
 
 В архиве `dist/DesktopSwitch-portable.zip` лежит папка для просмотра. Её распаковывают на локальный диск и запускают `Start-DesktopSwitch.vbs`. Установка и права администратора не нужны. В `config.json` этой копии `Preview` равен `true`: окно и значок у часов есть, рабочий стол не переключается. Чтобы включить переключение, поставьте `Preview` в `false` и `Enabled` в `true`.
 
-Если запустить один `DesktopSwitch.exe` и рядом нет `config.json`, либо в нём только три поля `Enabled`, `Preview` и `NetworkDesktopPath`, программа записывает полный файл по образцу `config.example.json`: `Enabled` становится `true`, `Preview` — `false`. Уже заполненный `config.json` она не перезаписывает. В коротком файле `Preview` был `true`, поэтому стол не переключался.
+Если запустить один `DesktopSwitch.exe` и рядом нет `config.json`, файл короткий, в нём ещё есть заявки Jira (`JiraBaseUrl`, `ServiceDesk`, `NewsJql`) или нет пути `C:\Users\Public\Desktop`, программа записывает полный файл по образцу `config.example.json`. `Enabled` становится `true`, `Preview` — `false`, локальный стол — `C:\Users\Public\Desktop`. Сохраняются непустая `EmergencyFolder`, своя иконка, цвет, угол кроме правого нижнего и явный UNC в `NetworkDesktopPath`. Файл, где локальный стол уже `C:\Users\Public\Desktop` и секции Jira нет, не перезаписывается.
 
-Программа написана на Windows PowerShell 5.1. Отдельного файла формы нет: окно, кнопка и список новостей создаются кодом Windows Forms в `DesktopSwitch.Widget.ps1`. `DesktopSwitch.ps1` следит за сетью, `DesktopSwitch.Logic.ps1` принимает решение о переключении стола. `DesktopSwitch.exe` — оконная оболочка без консоли: процесс в диспетчере задач называется DesktopSwitch, а скрипты выполняются внутри него.
+Программа написана на Windows PowerShell 5.1. Отдельного файла формы нет: кнопка создаётся кодом Windows Forms в `DesktopSwitch.Widget.ps1`. `DesktopSwitch.ps1` следит за сетью, `DesktopSwitch.Logic.ps1` принимает решение о переключении стола. `DesktopSwitch.exe` — оконная оболочка без консоли: процесс в диспетчере задач называется DesktopSwitch, а скрипты выполняются внутри него.
 
 ## Красная кнопка
 

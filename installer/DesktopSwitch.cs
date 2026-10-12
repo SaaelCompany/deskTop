@@ -12,8 +12,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("DesktopSwitch")]
 [assembly: AssemblyProduct("DesktopSwitch")]
 [assembly: AssemblyCompany("SaaelCompany")]
-[assembly: AssemblyVersion("1.2.36.0")]
-[assembly: AssemblyFileVersion("1.2.36.0")]
+[assembly: AssemblyVersion("1.2.37.0")]
+[assembly: AssemblyFileVersion("1.2.37.0")]
 
 internal static class DesktopSwitchHost {
     const string Title = "\u0421\u0435\u0440\u0432\u0438\u0441\u043d\u0430\u044f \u0441\u043b\u0443\u0436\u0431\u0430";
@@ -162,7 +162,7 @@ internal static class DesktopSwitchHost {
 
     static string Usage(string script) {
         var text = new StringBuilder();
-        text.AppendLine("DesktopSwitch 1.2.36");
+        text.AppendLine("DesktopSwitch 1.2.37");
         text.AppendLine(script);
         text.AppendLine("DesktopSwitch.exe");
         text.AppendLine("DesktopSwitch.exe -Status");
@@ -199,11 +199,19 @@ internal static class DesktopSwitchHost {
     static void EnsureConfig(string directory) {
         string path = Path.Combine(directory, "config.json");
         string previousNetwork = "";
+        string emergency = "";
+        string icon = "";
+        string color = "";
+        string corner = "";
         if (File.Exists(path)) {
             string existing = File.ReadAllText(path);
-            if (!IsShortConfig(existing)) return;
+            if (!NeedsTemplate(existing)) return;
             previousNetwork = JsonString(existing, "NetworkDesktopPath");
-            Note("short config.json will be replaced with the full template");
+            emergency = JsonString(existing, "EmergencyFolder");
+            icon = JsonString(existing, "Icon");
+            color = JsonString(existing, "Color");
+            corner = JsonString(existing, "Corner");
+            Note("outdated config.json will be replaced with the public-desktop template");
         }
         string text = ReadResource("config.example.json");
         text = text.Replace("\r\n", "\n").Replace("\r", "\n");
@@ -211,8 +219,30 @@ internal static class DesktopSwitchHost {
         if (previousNetwork.StartsWith("\\\\", StringComparison.Ordinal)) {
             text = ReplaceFirst(text, "\"NetworkDesktopPath\": \"\"", "\"NetworkDesktopPath\": \"" + previousNetwork + "\"");
         }
+        if (!string.IsNullOrWhiteSpace(emergency)) {
+            text = ReplaceFirst(text, "\"EmergencyFolder\": \"\"", "\"EmergencyFolder\": \"" + emergency + "\"");
+        }
+        if (!string.IsNullOrWhiteSpace(icon)) {
+            text = ReplaceFirst(text, "\"Icon\": \"\"", "\"Icon\": \"" + icon + "\"");
+        }
+        if (!string.IsNullOrWhiteSpace(color)) {
+            text = ReplaceFirst(text, "\"Color\": \"\"", "\"Color\": \"" + color + "\"");
+        }
+        if (!string.IsNullOrWhiteSpace(corner) && !string.Equals(corner, "BottomRight", StringComparison.OrdinalIgnoreCase)) {
+            text = ReplaceFirst(text, "\"Corner\": \"BottomRight\"", "\"Corner\": \"" + corner + "\"");
+        }
         File.WriteAllText(path, text.Replace("\n", "\r\n"), new UTF8Encoding(true));
         Note("wrote full config.json");
+    }
+
+    static bool NeedsTemplate(string text) {
+        if (IsShortConfig(text)) return true;
+        if (text.IndexOf("JiraBaseUrl", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+        if (text.IndexOf("ServiceDesk", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+        if (text.IndexOf("NewsJql", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+        if (text.IndexOf("Public\\\\Desktop", StringComparison.OrdinalIgnoreCase) < 0
+            && text.IndexOf("Public\\Desktop", StringComparison.OrdinalIgnoreCase) < 0) return true;
+        return false;
     }
 
     static bool IsShortConfig(string text) {
