@@ -484,6 +484,9 @@ Assert-Equal 'root hide flag' $rootHide.HideButtonWhenOnline $true
 Assert-Equal 'button visible while online by default' (Resolve-ButtonVisible -UserWantsButton $true -HideWhenOnline $false -Internet 'Up' -VisibleWhenUnsure $true) $true
 Assert-Equal 'button hidden while internet is up' (Resolve-ButtonVisible -UserWantsButton $true -HideWhenOnline $true -Internet 'Up' -VisibleWhenUnsure $true) $false
 Assert-Equal 'button returns when internet is down' (Resolve-ButtonVisible -UserWantsButton $true -HideWhenOnline $true -Internet 'Down' -VisibleWhenUnsure $false) $true
+Assert-Equal 'offline button ignores missing network desktop' (Resolve-ButtonVisible -UserWantsButton $true -HideWhenOnline $true -Internet 'Down' -VisibleWhenUnsure $false) $true
+Assert-True 'local desktop is not a switch target' (-not (Test-UncPathString 'C:\Users\ivanov\Desktop'))
+Assert-True 'missing network desktop skips switching' (-not (Test-UncPathString ''))
 Assert-Equal 'unknown internet keeps the button' (Resolve-ButtonVisible -UserWantsButton $true -HideWhenOnline $true -Internet 'Unknown' -VisibleWhenUnsure $true) $true
 Assert-Equal 'unknown internet can leave it hidden' (Resolve-ButtonVisible -UserWantsButton $true -HideWhenOnline $true -Internet '' -VisibleWhenUnsure $false) $false
 Assert-Equal 'user can hide the button' (Resolve-ButtonVisible -UserWantsButton $false -HideWhenOnline $false -Internet 'Down' -VisibleWhenUnsure $true) $false

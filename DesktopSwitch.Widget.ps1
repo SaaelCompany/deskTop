@@ -2145,7 +2145,7 @@ function Update-WidgetChrome {
 }
 
 function Update-WidgetStatus {
-    Update-WidgetChrome
+    try { Update-WidgetChrome } catch { }
     Set-LauncherChrome
 }
 

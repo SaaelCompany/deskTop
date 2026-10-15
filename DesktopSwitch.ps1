@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
 
-$script:Version = '1.2.39'
+$script:Version = '1.2.40'
 $script:Cfg = $null
 $script:State = $null
 $script:LogFile = $null
@@ -36,6 +36,7 @@ $script:NativeTried = $false
 $script:BackgroundIo = $null
 $script:StartedAt = Get-Date
 $script:GraceLogged = $false
+$script:NoNetworkDesktopLogged = $false
 
 $script:NativeSource = @'
 using System;
@@ -678,7 +679,24 @@ function Show-StatusReport {
 }
 
 function Invoke-MonitorCycle {
-    $current = Get-CurrentDesktopPath
+    $internet = 'Unknown'
+    try {
+        $internet = Get-InternetStatus
+    } catch {
+        Write-Log ("Проверка интернета не выполнилась: {0}" -f $_.Exception.Message) 'WARN'
+    }
+    $script:InternetStatus = [string]$internet
+    if (Get-Command -Name Set-LauncherChrome -ErrorAction SilentlyContinue) {
+        try { Set-LauncherChrome } catch { Write-Log ("Кнопку не удалось обновить: {0}" -f $_.Exception.Message) 'WARN' }
+    }
+
+    $current = ''
+    try {
+        $current = Get-CurrentDesktopPath
+    } catch {
+        Write-Log ("Не удалось прочитать путь рабочего стола: {0}" -f $_.Exception.Message) 'ERROR'
+        return
+    }
     $networkPath = Resolve-NetworkPathValue -Configured $script:Cfg.NetworkDesktopPath -Learned ([string]$script:State.LearnedNetworkPath) -Current $current
     $allowEmpty = [string]::IsNullOrWhiteSpace($networkPath)
     $errors = Get-DesktopConfigErrors -NetworkPath $networkPath -LocalPath $script:Cfg.LocalDesktopPath -AllowEmptyNetwork:$allowEmpty
@@ -686,8 +704,13 @@ function Invoke-MonitorCycle {
         foreach ($item in $errors) { Write-Log $item 'ERROR' }
         return
     }
-
-    $internet = Get-InternetStatus
+    if (-not (Test-UncPathString $networkPath)) {
+        if (-not $script:NoNetworkDesktopLogged) {
+            $script:NoNetworkDesktopLogged = $true
+            Write-Log 'Сетевого рабочего стола нет. Стол не переключается. Кнопка следит только за интернетом.'
+        }
+        return
+    }
     $share = 'Unknown'
     $internetOutage = $script:Cfg.Trigger -eq 'InternetOrShare' -and $internet -eq 'Down'
     $internetOnlyWithoutSync = $script:Cfg.Trigger -eq 'Internet' -and -not ($script:Cfg.SyncShortcutsWhileOnline -and $internet -eq 'Up')
@@ -709,7 +732,6 @@ function Invoke-MonitorCycle {
     $decision = Update-SwitchDecision -Verdict $switchVerdict -Mode $mode -FailureStreak ([int]$script:State.FailureStreak) -SuccessStreak ([int]$script:State.SuccessStreak) -FailuresBeforeSwitch $script:Cfg.FailuresBeforeSwitch -SuccessesBeforeRestore $script:Cfg.SuccessesBeforeRestore -RestoreWhenOnline $script:Cfg.RestoreWhenOnline
     $action = Get-EffectiveSwitchAction -Action ([string]$decision.Action) -CurrentPath $current -NetworkPath $networkPath -RestoreWhenOnline $script:Cfg.RestoreWhenOnline
     $reason = Get-OfflineReasonCode -Internet $internet -Share $share
-    $script:InternetStatus = [string]$internet
     $script:DesktopMode = [string]$decision.Mode
     $script:DesktopVerdict = [string]$verdict
     Write-Log ("internet={0} share={1} verdict={2} mode={3}->{4} action={5} fail={6} success={7} desktop={8}" -f $internet, $share, $verdict, $mode, $decision.Mode, $action, $decision.FailureStreak, $decision.SuccessStreak, $networkPath)
