@@ -4,7 +4,6 @@ using System.IO;
 using System.Management.Automation;
 using System.Management.Automation.Runspaces;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
@@ -12,47 +11,38 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("DesktopSwitch")]
 [assembly: AssemblyProduct("DesktopSwitch")]
 [assembly: AssemblyCompany("SaaelCompany")]
-[assembly: AssemblyVersion("1.2.40.0")]
-[assembly: AssemblyFileVersion("1.2.40.0")]
+[assembly: AssemblyVersion("1.2.41.0")]
+[assembly: AssemblyFileVersion("1.2.41.0")]
 
 internal static class DesktopSwitchHost {
     const string Title = "\u0421\u0435\u0440\u0432\u0438\u0441\u043d\u0430\u044f \u0441\u043b\u0443\u0436\u0431\u0430";
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
     static extern bool AllocConsole();
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
     static extern bool AttachConsole(int processId);
 
-    [DllImport("kernel32.dll")]
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
     static extern bool SetConsoleOutputCP(uint codePage);
 
-    [DllImport("kernel32.dll")]
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
     static extern bool SetConsoleCP(uint codePage);
 
     [STAThread]
     static int Main(string[] args) {
         bool status = false;
         bool once = false;
-        bool whatIf = false;
         bool stop = false;
         bool help = false;
-        string config = null;
         try {
             for (int i = 0; i < args.Length; i++) {
                 string arg = args[i] ?? "";
                 if (Same(arg, "-Status") || Same(arg, "/Status")) status = true;
                 else if (Same(arg, "-Once") || Same(arg, "/Once")) once = true;
-                else if (Same(arg, "-WhatIf") || Same(arg, "/WhatIf")) whatIf = true;
                 else if (Same(arg, "-Stop") || Same(arg, "/Stop")) stop = true;
                 else if (Same(arg, "-Help") || Same(arg, "/?") || Same(arg, "-?")) help = true;
-                else if (Same(arg, "-Config") || Same(arg, "-ConfigPath") || Same(arg, "/Config")) {
-                    if (i + 1 >= args.Length || string.IsNullOrWhiteSpace(args[i + 1])) {
-                        Fail("\u041d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d \u0444\u0430\u0439\u043b \u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438.");
-                        return 1;
-                    }
-                    config = args[++i];
-                } else {
+                else {
                     Fail("\u041d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u044b\u0439 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440: " + arg);
                     return 1;
                 }
@@ -79,7 +69,7 @@ internal static class DesktopSwitchHost {
             bool ownConsole = false;
             if (status) ownConsole = OpenConsole();
             Note("start " + string.Join(" ", args));
-            int code = RunScript(script, status, once, whatIf, config);
+            int code = RunScript(script, status, once);
             if (status && ownConsole) {
                 Console.WriteLine();
                 Console.WriteLine("\u041d\u0430\u0436\u043c\u0438\u0442\u0435 Enter");
@@ -93,7 +83,7 @@ internal static class DesktopSwitchHost {
         }
     }
 
-    static int RunScript(string script, bool status, bool once, bool whatIf, string config) {
+    static int RunScript(string script, bool status, bool once) {
         InitialSessionState state = InitialSessionState.CreateDefault();
         using (Runspace runspace = RunspaceFactory.CreateRunspace(state)) {
             runspace.ApartmentState = ApartmentState.STA;
@@ -109,10 +99,6 @@ internal static class DesktopSwitchHost {
                 command.Append(". ").Append(PsQuote(script));
                 if (status) command.Append(" -Status");
                 if (once) command.Append(" -Once");
-                if (whatIf) command.Append(" -WhatIf");
-                if (!string.IsNullOrWhiteSpace(config)) {
-                    command.Append(" -ConfigPath ").Append(PsQuote(config));
-                }
                 ps.AddScript(command.ToString(), false);
                 try {
                     ps.Invoke();
@@ -162,12 +148,12 @@ internal static class DesktopSwitchHost {
 
     static string Usage(string script) {
         var text = new StringBuilder();
-        text.AppendLine("DesktopSwitch 1.2.40");
+        text.AppendLine("DesktopSwitch 1.2.41");
+        text.AppendLine("\u041a\u0440\u0430\u0441\u043d\u0430\u044f \u043a\u043d\u043e\u043f\u043a\u0430, \u043a\u043e\u0433\u0434\u0430 \u043d\u0435\u0442 \u0438\u043d\u0442\u0435\u0440\u043d\u0435\u0442\u0430. \u041d\u0430\u0436\u0430\u0442\u0438\u0435 \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u0442 C:\\Users\\Public\\Desktop.");
         text.AppendLine(script);
         text.AppendLine("DesktopSwitch.exe");
         text.AppendLine("DesktopSwitch.exe -Status");
-        text.AppendLine("DesktopSwitch.exe -Once -WhatIf");
-        text.AppendLine("DesktopSwitch.exe -ConfigPath C:\\path\\config.json");
+        text.AppendLine("DesktopSwitch.exe -Once");
         text.AppendLine("DesktopSwitch.exe -Stop");
         return text.ToString();
     }
@@ -182,7 +168,6 @@ internal static class DesktopSwitchHost {
         if (ScriptsReady(exeDir)) {
             if (CanWrite(exeDir)) {
                 try { RefreshScripts(exeDir); } catch (Exception ex) { Note("script refresh skipped: " + ex.Message); }
-                try { EnsureConfig(exeDir); } catch (Exception ex) { Note("config write skipped: " + ex.Message); }
             }
             return Path.Combine(exeDir, "DesktopSwitch.ps1");
         }
@@ -191,105 +176,8 @@ internal static class DesktopSwitchHost {
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DesktopSwitch", "app");
         Directory.CreateDirectory(dest);
         RefreshScripts(dest);
-        EnsureConfig(dest);
         Note("extracted scripts to " + dest);
         return Path.Combine(dest, "DesktopSwitch.ps1");
-    }
-
-    static void EnsureConfig(string directory) {
-        string path = Path.Combine(directory, "config.json");
-        string previousNetwork = "";
-        string emergency = "";
-        string icon = "";
-        string color = "";
-        string corner = "";
-        if (File.Exists(path)) {
-            string existing = File.ReadAllText(path);
-            if (!NeedsTemplate(existing)) return;
-            previousNetwork = JsonString(existing, "NetworkDesktopPath");
-            emergency = JsonString(existing, "EmergencyFolder");
-            icon = JsonString(existing, "Icon");
-            color = JsonString(existing, "Color");
-            corner = JsonString(existing, "Corner");
-            Note("outdated config.json will be replaced with the public-desktop template");
-        }
-        string text = ReadResource("config.example.json");
-        text = text.Replace("\r\n", "\n").Replace("\r", "\n");
-        text = ReplaceFirst(text, "\"Enabled\": false", "\"Enabled\": true");
-        if (previousNetwork.StartsWith("\\\\", StringComparison.Ordinal)) {
-            text = ReplaceFirst(text, "\"NetworkDesktopPath\": \"\"", "\"NetworkDesktopPath\": \"" + previousNetwork + "\"");
-        }
-        if (!string.IsNullOrWhiteSpace(emergency)) {
-            text = ReplaceFirst(text, "\"EmergencyFolder\": \"\"", "\"EmergencyFolder\": \"" + emergency + "\"");
-        }
-        if (!string.IsNullOrWhiteSpace(icon)) {
-            text = ReplaceFirst(text, "\"Icon\": \"\"", "\"Icon\": \"" + icon + "\"");
-        }
-        if (!string.IsNullOrWhiteSpace(color)) {
-            text = ReplaceFirst(text, "\"Color\": \"\"", "\"Color\": \"" + color + "\"");
-        }
-        if (!string.IsNullOrWhiteSpace(corner) && !string.Equals(corner, "BottomRight", StringComparison.OrdinalIgnoreCase)) {
-            text = ReplaceFirst(text, "\"Corner\": \"BottomRight\"", "\"Corner\": \"" + corner + "\"");
-        }
-        File.WriteAllText(path, text.Replace("\n", "\r\n"), new UTF8Encoding(true));
-        Note("wrote full config.json");
-    }
-
-    static bool NeedsTemplate(string text) {
-        if (IsShortConfig(text)) return true;
-        if (text.IndexOf("JiraBaseUrl", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-        if (text.IndexOf("ServiceDesk", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-        if (text.IndexOf("NewsJql", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-        if (text.IndexOf("Public\\\\Desktop", StringComparison.OrdinalIgnoreCase) < 0
-            && text.IndexOf("Public\\Desktop", StringComparison.OrdinalIgnoreCase) < 0) return true;
-        return false;
-    }
-
-    static bool IsShortConfig(string text) {
-        if (string.IsNullOrWhiteSpace(text)) return true;
-        if (text.IndexOf("LocalDesktopPath", StringComparison.OrdinalIgnoreCase) >= 0) return false;
-        if (text.IndexOf("Widget", StringComparison.OrdinalIgnoreCase) >= 0) return false;
-        if (text.IndexOf("EmergencyFolder", StringComparison.OrdinalIgnoreCase) >= 0) return false;
-        if (text.IndexOf("JiraBaseUrl", StringComparison.OrdinalIgnoreCase) >= 0) return false;
-        if (text.IndexOf("ServiceDesk", StringComparison.OrdinalIgnoreCase) >= 0) return false;
-        return text.Length < 1200;
-    }
-
-    static string JsonString(string text, string name) {
-        string key = "\"" + name + "\"";
-        int at = text.IndexOf(key, StringComparison.OrdinalIgnoreCase);
-        if (at < 0) return "";
-        int colon = text.IndexOf(':', at + key.Length);
-        if (colon < 0) return "";
-        int quote = text.IndexOf('"', colon + 1);
-        if (quote < 0) return "";
-        var value = new StringBuilder();
-        for (int i = quote + 1; i < text.Length; i++) {
-            char ch = text[i];
-            if (ch == '\\' && i + 1 < text.Length) {
-                value.Append(ch);
-                value.Append(text[++i]);
-                continue;
-            }
-            if (ch == '"') break;
-            value.Append(ch);
-        }
-        return value.ToString();
-    }
-
-    static string ReplaceFirst(string text, string oldValue, string newValue) {
-        int at = text.IndexOf(oldValue, StringComparison.Ordinal);
-        if (at < 0) return text;
-        return text.Substring(0, at) + newValue + text.Substring(at + oldValue.Length);
-    }
-
-    static string ReadResource(string name) {
-        using (Stream source = Assembly.GetExecutingAssembly().GetManifestResourceStream(name)) {
-            if (source == null) throw new FileNotFoundException(name);
-            using (var reader = new StreamReader(source, new UTF8Encoding(false), true)) {
-                return reader.ReadToEnd();
-            }
-        }
     }
 
     static void RefreshScripts(string directory) {
@@ -318,17 +206,7 @@ internal static class DesktopSwitchHost {
         }
     }
 
-    static string Explain(string text) {
-        if (string.IsNullOrEmpty(text)) return text;
-        if (text.IndexOf("\u0434\u043e\u043f\u0443\u0441\u0442\u0438\u043c\u044b\u0439 \u043f\u0443\u0442\u044c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f", StringComparison.OrdinalIgnoreCase) >= 0
-            || text.IndexOf("valid user path", StringComparison.OrdinalIgnoreCase) >= 0) {
-            return "\u042d\u0442\u043e \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435 Windows, \u0430 \u043d\u0435 \u043e\u0448\u0438\u0431\u043a\u0430 config.json. \u0423 \u0443\u0447\u0451\u0442\u043d\u043e\u0439 \u0437\u0430\u043f\u0438\u0441\u0438 \u043d\u0435 \u0437\u0430\u0434\u0430\u043d\u0430 \u0434\u043e\u043c\u0430\u0448\u043d\u044f\u044f \u043f\u0430\u043f\u043a\u0430. \u0423\u043a\u0430\u0436\u0438\u0442\u0435 \u0435\u0451 \u0432 \u0441\u0432\u043e\u0439\u0441\u0442\u0432\u0430\u0445 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f, \u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440 C:\\Users\\\u0438\u043c\u044f.\r\n\r\n" + text;
-        }
-        return text;
-    }
-
     static void Fail(string text) {
-        text = Explain(text);
         Note(text);
         try {
             MessageBox.Show(text, Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);

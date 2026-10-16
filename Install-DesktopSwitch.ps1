@@ -1,11 +1,11 @@
 ﻿#Requires -Version 5.1
 <#
-    Включает автозапуск монитора в сеансе пользователя.
-    По умолчанию — папка «Автозагрузка» текущего пользователя.
-    С ключом -AllUsers — общая автозагрузка компьютера (нужны права администратора).
-    -InstallDir копирует пакет в постоянную локальную папку. Так его ставит SCCM.
-    Учётная запись SYSTEM сама выбирает общую автозагрузку и не запускает монитор в сеансе 0.
-    С ключом -ScheduledTask дополнительно создаётся задача планировщика.
+    Включает автозапуск в сеансе текущего пользователя.
+    Права администратора не нужны.
+    -AllUsers и учётная запись SYSTEM не кладут ярлык в общую автозагрузку:
+    такой ярлык даёт ошибку Windows 2211. Для всего компьютера ставьте MSI.
+    -InstallDir копирует пакет в постоянную локальную папку.
+    -ScheduledTask дополнительно создаёт задачу планировщика.
 #>
 [CmdletBinding()]
 param(
@@ -19,25 +19,6 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
-
-$configPath = Join-Path $PSScriptRoot 'config.json'
-$example = Join-Path $PSScriptRoot 'config.example.json'
-if (-not (Test-Path -LiteralPath $configPath)) {
-    throw "Нет файла config.json. Скопируйте '$example' в '$configPath' и поставьте Enabled в true. Права администратора не нужны, сетевой путь политика задаёт сама."
-}
-
-$loaded = ConvertFrom-DesktopJson (Get-Content -LiteralPath $configPath -Raw -Encoding UTF8)
-$effective = Get-EffectiveDesktopConfig $loaded
-$problems = New-Object System.Collections.Generic.List[string]
-if (-not $effective.Enabled) {
-    $problems.Add('В config.json параметр Enabled должен быть true.')
-}
-$allowEmpty = [string]::IsNullOrWhiteSpace($effective.NetworkDesktopPath)
-$errors = Get-DesktopConfigErrors -NetworkPath $effective.NetworkDesktopPath -LocalPath $effective.LocalDesktopPath -AllowEmptyNetwork:$allowEmpty
-foreach ($item in $errors) { $problems.Add([string]$item) }
-if ($problems.Count -gt 0) {
-    throw [string]::Join([Environment]::NewLine, @($problems))
-}
 
 function Stop-DesktopSwitchMonitor {
     foreach ($proc in @(Get-Process -Name 'DesktopSwitch' -ErrorAction SilentlyContinue)) {
@@ -86,25 +67,12 @@ function Copy-DesktopSwitchPackage {
         'Install-DesktopSwitch.ps1',
         'Uninstall-DesktopSwitch.ps1',
         'Show-DesktopSwitchStatus.cmd',
-        'config.json',
-        'config.example.json',
         'README.md'
     )
     foreach ($name in $names) {
         $from = Join-Path $sourceFull $name
         if (-not (Test-Path -LiteralPath $from)) { continue }
         Copy-Item -LiteralPath $from -Destination (Join-Path $destFull $name) -Force
-    }
-    $news = Join-Path $sourceFull 'examples\news.json'
-    if (Test-Path -LiteralPath $news) {
-        $examples = Join-Path $destFull 'examples'
-        if (-not (Test-Path -LiteralPath $examples)) {
-            New-Item -ItemType Directory -Path $examples -Force | Out-Null
-        }
-        Copy-Item -LiteralPath $news -Destination (Join-Path $examples 'news.json') -Force
-    }
-    if (-not (Test-Path -LiteralPath (Join-Path $destFull 'config.json'))) {
-        throw 'В пакете нет config.json. Положите готовый файл настроек в источник SCCM.'
     }
     if (-not (Test-Path -LiteralPath (Join-Path $destFull 'DesktopSwitch.ps1'))) {
         throw 'В пакете нет DesktopSwitch.ps1.'
@@ -130,36 +98,35 @@ $identityName = Get-InstallerIdentityName
 $systemAccount = Test-InstallerSystemAccount $identityName
 $scope = Resolve-InstallerStartupScope -AllUsers ([bool]$AllUsers) -SystemAccount $systemAccount
 if ($systemAccount -and -not $AllUsers) {
-    Write-Host 'Учётная запись установки — SYSTEM. Автозапуск будет общим для всех пользователей.'
+    Write-Host 'Учётная запись установки — SYSTEM. Общая автозагрузка не используется.'
 }
 
-if ($scope -eq 'AllUsers') {
-    $startup = [Environment]::GetFolderPath('CommonStartup')
-} else {
+if ($scope -eq 'CurrentUser') {
     $startup = [Environment]::GetFolderPath('Startup')
-}
-if ([string]::IsNullOrWhiteSpace($startup)) { throw 'Не удалось определить папку автозагрузки.' }
-$vbsPath = Join-Path $startup 'DesktopSwitch.vbs'
-
-if (-not [string]::IsNullOrWhiteSpace($exeFull)) {
-    $escaped = $exeFull.Replace('"', '""')
-    $vbs = @"
+    if ([string]::IsNullOrWhiteSpace($startup)) { throw 'Не удалось определить папку автозагрузки.' }
+    $vbsPath = Join-Path $startup 'DesktopSwitch.vbs'
+    if (-not [string]::IsNullOrWhiteSpace($exeFull)) {
+        $escaped = $exeFull.Replace('"', '""')
+        $vbs = @"
 Set shell = CreateObject("Wscript.Shell")
 shell.Run """$escaped""", 0, False
 "@.Trim()
-    $encoding = 'ASCII'
-    if ($exeFull -match '[^\x00-\x7F]') { $encoding = 'Unicode' }
-} else {
-    $escaped = $monitor.Replace('"', '""')
-    $vbs = @"
+        $encoding = 'ASCII'
+        if ($exeFull -match '[^\x00-\x7F]') { $encoding = 'Unicode' }
+    } else {
+        $escaped = $monitor.Replace('"', '""')
+        $vbs = @"
 Set shell = CreateObject("Wscript.Shell")
 shell.Run "powershell.exe -NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File ""$escaped""", 0, False
 "@.Trim()
-    $encoding = 'ASCII'
-    if ($monitor -match '[^\x00-\x7F]') { $encoding = 'Unicode' }
+        $encoding = 'ASCII'
+        if ($monitor -match '[^\x00-\x7F]') { $encoding = 'Unicode' }
+    }
+    Set-Content -LiteralPath $vbsPath -Value $vbs -Encoding $encoding
+    Write-Host ("Автозапуск создан: {0}" -f $vbsPath)
+} else {
+    Write-Host 'Общая папка автозагрузки не используется. Для всех пользователей ставьте DesktopSwitch.msi: автозапуск записан в HKLM\Software\Microsoft\Windows\CurrentVersion\Run.'
 }
-Set-Content -LiteralPath $vbsPath -Value $vbs -Encoding $encoding
-Write-Host ("Автозапуск создан: {0}" -f $vbsPath)
 
 if ($ScheduledTask) {
     try {
@@ -180,7 +147,7 @@ if ($ScheduledTask) {
         Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
         Write-Host ("Задача планировщика создана: {0}" -f $TaskName)
     } catch {
-        Write-Host ("Задачу планировщика создать не удалось. Автозагрузки достаточно. Причина: {0}" -f $_.Exception.Message)
+        Write-Host ("Задачу планировщика создать не удалось. Причина: {0}" -f $_.Exception.Message)
     }
 }
 
@@ -195,6 +162,5 @@ if (Test-InstallerShouldLaunch -SystemAccount $systemAccount -NoLaunch ([bool]$N
 } else {
     Write-Host 'Монитор запустится при следующем входе пользователя.'
 }
-Write-Host ("Настройки: {0}" -f (Join-Path $packageRoot 'config.json'))
-Write-Host ("Журнал: {0}" -f $effective.LogPath)
-Write-Host 'Проверка: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\DesktopSwitch.ps1 -Status'
+Write-Host ("Журнал: {0}" -f (Join-Path $env:LOCALAPPDATA 'DesktopSwitch\desktop-switch.log'))
+Write-Host 'Проверка: DesktopSwitch.exe -Status'

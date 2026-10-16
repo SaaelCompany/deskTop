@@ -5,12 +5,13 @@ import shutil
 import struct
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = Path(__file__).resolve().parent
-VERSION = "1.2.40"
-PRODUCT_CODE = "{B7D14F92-6C38-4E21-A5B0-9F3C8E2D1A64}"
+VERSION = "1.2.41"
+PRODUCT_CODE = "{C4A81E57-2D60-4F93-B8C1-6E9A3D5F0B28}"
 UPGRADE_CODE = "{4048E9C4-7965-48DC-A23D-A4554966E57F}"
 
 
@@ -83,23 +84,6 @@ def write_icon(path):
     path.write_bytes(blob)
 
 
-def sccm_config(example: Path, destination: Path):
-    override = INSTALLER / "config.sccm.json"
-    if override.exists():
-        data = override.read_bytes()
-    else:
-        text = example.read_text(encoding="utf-8-sig")
-        needle = '"Enabled": false'
-        if needle not in text:
-            raise SystemExit("config.example.json has no Enabled false switch")
-        text = text.replace(needle, '"Enabled": true', 1)
-        note = "// Файл пакета SCCM. Enabled включён. LocalDesktopPath — C:\\Users\\Public\\Desktop. EmergencyFolder заполните перед раздачей.\n"
-        if not text.startswith(note):
-            text = note + text
-        data = b"\xef\xbb\xbf" + text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
-    destination.write_bytes(data)
-
-
 def sql_quote(value):
     return "'" + value.replace("'", "''") + "'"
 
@@ -146,7 +130,6 @@ def main():
     if stage.exists():
         shutil.rmtree(stage)
     stage.mkdir(parents=True)
-    (stage / "examples").mkdir()
     write_icon(INSTALLER / "DesktopSwitch.ico")
     shutil.copy(INSTALLER / "DesktopSwitch.ico", stage / "DesktopSwitch.ico")
 
@@ -157,16 +140,10 @@ def main():
         "Install-DesktopSwitch.ps1",
         "Uninstall-DesktopSwitch.ps1",
         "Show-DesktopSwitchStatus.cmd",
-        "config.example.json",
         "README.md",
     ]
     for name in names:
         shutil.copy(ROOT / name, stage / name)
-    shutil.copy(ROOT / "examples" / "news.json", stage / "examples" / "news.json")
-    sccm_config(ROOT / "config.example.json", stage / "config.json")
-    config_text = (stage / "config.json").read_text(encoding="utf-8-sig")
-    if '"Enabled": true' not in config_text:
-        raise SystemExit("SCCM config is not enabled")
 
     exe = stage / "DesktopSwitch.exe"
     run([
@@ -179,12 +156,15 @@ def main():
         "-resource:" + str(stage / "DesktopSwitch.ps1") + ",DesktopSwitch.ps1",
         "-resource:" + str(stage / "DesktopSwitch.Logic.ps1") + ",DesktopSwitch.Logic.ps1",
         "-resource:" + str(stage / "DesktopSwitch.Widget.ps1") + ",DesktopSwitch.Widget.ps1",
-        "-resource:" + str(ROOT / "config.example.json") + ",config.example.json",
         "-out:" + str(exe),
         str(INSTALLER / "DesktopSwitch.cs"),
     ])
     if subsystem(exe) != 2:
         raise SystemExit("DesktopSwitch.exe is not a Windows GUI binary")
+    blob = exe.read_bytes()
+    for banned in (b"config.example.json", b"config.json", b"SHSetKnownFolderPath", b"NotifyIcon", b"JiraBaseUrl"):
+        if banned in blob:
+            raise SystemExit("DesktopSwitch.exe still contains %s" % banned.decode())
 
     wxs = stage / "DesktopSwitch.wxs"
     shutil.copy(INSTALLER / "DesktopSwitch.wxs", wxs)
@@ -198,16 +178,50 @@ def main():
         1391,
     )
 
+    file_table = subprocess.check_output(["msiinfo", "export", str(msi), "File"], text=True, errors="replace")
+    for banned in ("config.json", "config.example.json", "news.json"):
+        if banned in file_table:
+            raise SystemExit("msi still packages %s" % banned)
+    summary = subprocess.check_output(["msiinfo", "suminfo", str(msi)], text=True, errors="replace")
+    if VERSION not in summary and VERSION not in file_table:
+        # ProductVersion lives in the Property table.
+        props = subprocess.check_output(["msiinfo", "export", str(msi), "Property"], text=True, errors="replace")
+        if "ProductVersion\t%s" % VERSION not in props and "ProductVersion\t%s" % VERSION not in props.replace("\t", " "):
+            if VERSION not in props:
+                raise SystemExit("msi ProductVersion is not %s" % VERSION)
+
+    note = (
+        "DesktopSwitch %s\r\n\r\n"
+        "Распакуйте архив на локальный диск и запустите DesktopSwitch.exe.\r\n"
+        "Файл конфигурации не нужен. Значка у часов нет. Рабочий стол не переключается.\r\n\r\n"
+        "Если интернет пропадает, в правом нижнем углу появляется красная кнопка\r\n"
+        "с белым восклицательным знаком. Нажатие открывает C:\\Users\\Public\\Desktop.\r\n"
+        "Когда интернет возвращается, кнопка исчезает.\r\n\r\n"
+        "Кнопка появляется после двух проверок подряд без интернета\r\n"
+        "и исчезает после двух проверок подряд с интернетом. Интервал — 5 секунд.\r\n\r\n"
+        "Остановить программу можно в диспетчере задач: процесс DesktopSwitch.\r\n"
+        "Если антивирус удаляет exe при скачивании из браузера, берите этот архив.\r\n"
+    ) % VERSION
+    zip_path = stage / "DesktopSwitch-portable.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name in names:
+            archive.write(stage / name, "DesktopSwitch/" + name)
+        archive.write(exe, "DesktopSwitch/DesktopSwitch.exe")
+        archive.writestr("DesktopSwitch/ПРОЧТИТЕ.txt", "\ufeff" + note)
+
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
     shutil.copy(exe, dist / "DesktopSwitch.exe")
     shutil.copy(msi, dist / "DesktopSwitch.msi")
+    shutil.copy(zip_path, dist / "DesktopSwitch-portable.zip")
     artifacts = Path("/opt/cursor/artifacts")
     if artifacts.exists():
         shutil.copyfile(exe, artifacts / "DesktopSwitch.exe")
         shutil.copyfile(msi, artifacts / "DesktopSwitch.msi")
+        shutil.copyfile(zip_path, artifacts / "DesktopSwitch-portable.zip")
     print(dist / "DesktopSwitch.exe", (dist / "DesktopSwitch.exe").stat().st_size)
     print(dist / "DesktopSwitch.msi", (dist / "DesktopSwitch.msi").stat().st_size)
+    print(dist / "DesktopSwitch-portable.zip", (dist / "DesktopSwitch-portable.zip").stat().st_size)
     print("ProductCode", PRODUCT_CODE)
     print("UpgradeCode", UPGRADE_CODE)
     print("Version", VERSION)
