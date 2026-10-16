@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'EmergencyFolder.Logic.ps1')
 . (Join-Path $PSScriptRoot 'EmergencyFolder.Widget.ps1')
 
-$script:Version = '1.2.43'
+$script:Version = '1.2.44'
 $script:IntervalSeconds = 60
 $script:PingTimeoutMs = 2000
 $script:DownChecks = 1

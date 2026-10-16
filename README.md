@@ -24,14 +24,14 @@
 msiexec /i "Emergency folder.msi" /qn /l*v "C:\Windows\Temp\Emergency folder-install.log"
 ```
 
-Код продукта этой сборки: `{D4E81B36-7A25-4C09-9F63-1B8A5E0C7D42}`. Код обновления, он не меняется между версиями: `{4048E9C4-7965-48DC-A23D-A4554966E57F}`.
+Код продукта этой сборки: `{E5F92C47-8B36-4D1A-A074-2C9B6F1D8E53}`. Код обновления, он не меняется между версиями: `{4048E9C4-7965-48DC-A23D-A4554966E57F}`.
 
-Обнаружение для SCCM: установлен этот код продукта, либо существует `C:\Program Files\Emergency folder\Emergency folder.exe`, либо в `HKLM\Software\SaaelCompany\Emergency folder` значение `Version` равно `1.2.43`.
+Обнаружение для SCCM: установлен этот код продукта, либо существует `C:\Program Files\Emergency folder\Emergency folder.exe`, либо в `HKLM\Software\SaaelCompany\Emergency folder` значение `Version` равно `1.2.44`.
 
 Удаление:
 
 ```text
-msiexec /x {D4E81B36-7A25-4C09-9F63-1B8A5E0C7D42} /qn
+msiexec /x {E5F92C47-8B36-4D1A-A074-2C9B6F1D8E53} /qn
 ```
 
 Следующая версия получает новый код продукта и больший номер версии. Код обновления остаётся прежним, и Windows Installer снимает старую копию сам.

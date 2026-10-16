@@ -115,9 +115,12 @@ foreach ($name in @('EmergencyFolder.ps1', 'EmergencyFolder.Widget.ps1', 'instal
 }
 $logicText = Get-Content -LiteralPath (Join-Path $root 'EmergencyFolder.Logic.ps1') -Raw -Encoding UTF8
 Assert-True 'logic has no json config' ($logicText -notmatch 'ConvertFrom-Json')
-Assert-True 'widget paints exclamation' ((Get-Content -LiteralPath (Join-Path $root 'EmergencyFolder.Widget.ps1') -Raw -Encoding UTF8) -match 'DrawLine')
+$widgetText = Get-Content -LiteralPath (Join-Path $root 'EmergencyFolder.Widget.ps1') -Raw -Encoding UTF8
+Assert-True 'widget paints exclamation' ($widgetText -match 'DrawLine')
+Assert-True 'smooth layered edge' ($widgetText -match 'UpdateLayeredWindow')
+Assert-True 'no clipped window edge' ($widgetText -notmatch 'new Region')
 $mainText = Get-Content -LiteralPath (Join-Path $root 'EmergencyFolder.ps1') -Raw -Encoding UTF8
-Assert-True 'version bumped' ($mainText -match '1\.2\.43')
+Assert-True 'version bumped' ($mainText -match '1\.2\.44')
 Assert-True 'program name' ($mainText -match 'Emergency folder')
 Assert-True 'pings the domain controller' ($mainText -match '172\.16\.9\.7')
 Assert-True 'checks every minute' ($mainText -match 'IntervalSeconds = 60')

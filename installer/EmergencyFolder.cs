@@ -11,8 +11,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("Emergency folder")]
 [assembly: AssemblyProduct("Emergency folder")]
 [assembly: AssemblyCompany("SaaelCompany")]
-[assembly: AssemblyVersion("1.2.43.0")]
-[assembly: AssemblyFileVersion("1.2.43.0")]
+[assembly: AssemblyVersion("1.2.44.0")]
+[assembly: AssemblyFileVersion("1.2.44.0")]
 
 internal static class EmergencyFolderHost {
     const string Title = "Emergency folder";
@@ -150,7 +150,7 @@ internal static class EmergencyFolderHost {
 
     static string Usage(string script) {
         var text = new StringBuilder();
-        text.AppendLine("Emergency folder 1.2.43");
+        text.AppendLine("Emergency folder 1.2.44");
         text.AppendLine("\u041a\u0440\u0430\u0441\u043d\u0430\u044f \u043a\u043d\u043e\u043f\u043a\u0430, \u043a\u043e\u0433\u0434\u0430 \u043d\u0435\u0442 \u0438\u043d\u0442\u0435\u0440\u043d\u0435\u0442\u0430. \u041d\u0430\u0436\u0430\u0442\u0438\u0435 \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u0442 C:\\Users\\Public\\Desktop.");
         text.AppendLine(script);
         text.AppendLine("Emergency folder.exe");
