@@ -1,10 +1,10 @@
-﻿# Decision tests for DesktopSwitch. Run from any OS:
+﻿# Decision tests for Emergency folder. Run from any OS:
 #   pwsh -NoProfile -File tests/Decision.Tests.ps1
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-. (Join-Path (Split-Path $PSScriptRoot -Parent) 'DesktopSwitch.Logic.ps1')
+. (Join-Path (Split-Path $PSScriptRoot -Parent) 'EmergencyFolder.Logic.ps1')
 
 $script:Failed = 0
 
@@ -112,21 +112,23 @@ Assert-Equal 'user startup' (Resolve-InstallerStartupScope -AllUsers $false -Sys
 Assert-Equal 'machine startup' (Resolve-InstallerStartupScope -AllUsers $true -SystemAccount $false) 'AllUsers'
 Assert-True 'system does not launch' (-not (Test-InstallerShouldLaunch -SystemAccount $true -NoLaunch $false))
 Assert-True 'user launch' (Test-InstallerShouldLaunch -SystemAccount $false -NoLaunch $false)
-Assert-True 'local install dir' (Test-DesktopSwitchInstallDir 'C:\Program Files\DesktopSwitch')
-Assert-True 'unc rejected' (-not (Test-DesktopSwitchInstallDir '\\server\share'))
-Assert-True 'drive root rejected' (-not (Test-DesktopSwitchInstallDir 'C:\'))
+Assert-True 'local install dir' (Test-EmergencyFolderInstallDir 'C:\Program Files\Emergency folder')
+Assert-True 'unc rejected' (-not (Test-EmergencyFolderInstallDir '\\server\share'))
+Assert-True 'drive root rejected' (-not (Test-EmergencyFolderInstallDir 'C:\'))
 
 $root = Split-Path $PSScriptRoot -Parent
-foreach ($name in @('DesktopSwitch.ps1', 'DesktopSwitch.Widget.ps1', 'installer\DesktopSwitch.cs')) {
+foreach ($name in @('EmergencyFolder.ps1', 'EmergencyFolder.Widget.ps1', 'installer\EmergencyFolder.cs')) {
     $text = Get-Content -LiteralPath (Join-Path $root $name) -Raw -Encoding UTF8
     Assert-True ("no config reader in {0}" -f $name) ($text -notmatch 'config\.json')
     Assert-True ("no tray in {0}" -f $name) ($text -notmatch 'NotifyIcon')
     Assert-True ("no known folder write in {0}" -f $name) ($text -notmatch 'SHSetKnownFolderPath')
 }
-$logicText = Get-Content -LiteralPath (Join-Path $root 'DesktopSwitch.Logic.ps1') -Raw -Encoding UTF8
+$logicText = Get-Content -LiteralPath (Join-Path $root 'EmergencyFolder.Logic.ps1') -Raw -Encoding UTF8
 Assert-True 'logic has no json config' ($logicText -notmatch 'ConvertFrom-Json')
-Assert-True 'widget paints exclamation' ((Get-Content -LiteralPath (Join-Path $root 'DesktopSwitch.Widget.ps1') -Raw -Encoding UTF8) -match 'DrawLine')
-Assert-True 'version bumped' ((Get-Content -LiteralPath (Join-Path $root 'DesktopSwitch.ps1') -Raw -Encoding UTF8) -match '1\.2\.41')
+Assert-True 'widget paints exclamation' ((Get-Content -LiteralPath (Join-Path $root 'EmergencyFolder.Widget.ps1') -Raw -Encoding UTF8) -match 'DrawLine')
+$mainText = Get-Content -LiteralPath (Join-Path $root 'EmergencyFolder.ps1') -Raw -Encoding UTF8
+Assert-True 'version bumped' ($mainText -match '1\.2\.42')
+Assert-True 'program name' ($mainText -match 'Emergency folder')
 
 if ($script:Failed -gt 0) {
     Write-Host ("{0} failed" -f $script:Failed)

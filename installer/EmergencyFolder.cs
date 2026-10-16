@@ -8,14 +8,14 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-[assembly: AssemblyTitle("DesktopSwitch")]
-[assembly: AssemblyProduct("DesktopSwitch")]
+[assembly: AssemblyTitle("Emergency folder")]
+[assembly: AssemblyProduct("Emergency folder")]
 [assembly: AssemblyCompany("SaaelCompany")]
-[assembly: AssemblyVersion("1.2.41.0")]
-[assembly: AssemblyFileVersion("1.2.41.0")]
+[assembly: AssemblyVersion("1.2.42.0")]
+[assembly: AssemblyFileVersion("1.2.42.0")]
 
-internal static class DesktopSwitchHost {
-    const string Title = "\u0421\u0435\u0440\u0432\u0438\u0441\u043d\u0430\u044f \u0441\u043b\u0443\u0436\u0431\u0430";
+internal static class EmergencyFolderHost {
+    const string Title = "Emergency folder";
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
     static extern bool AllocConsole();
@@ -116,9 +116,11 @@ internal static class DesktopSwitchHost {
 
     static void StopOtherCopies() {
         int self = Process.GetCurrentProcess().Id;
-        foreach (Process proc in Process.GetProcessesByName("DesktopSwitch")) {
-            if (proc.Id == self) continue;
-            try { proc.Kill(); } catch { }
+        foreach (string name in new[] { "Emergency folder", "DesktopSwitch" }) {
+            foreach (Process proc in Process.GetProcessesByName(name)) {
+                if (proc.Id == self) continue;
+                try { proc.Kill(); } catch { }
+            }
         }
     }
 
@@ -148,20 +150,20 @@ internal static class DesktopSwitchHost {
 
     static string Usage(string script) {
         var text = new StringBuilder();
-        text.AppendLine("DesktopSwitch 1.2.41");
+        text.AppendLine("Emergency folder 1.2.42");
         text.AppendLine("\u041a\u0440\u0430\u0441\u043d\u0430\u044f \u043a\u043d\u043e\u043f\u043a\u0430, \u043a\u043e\u0433\u0434\u0430 \u043d\u0435\u0442 \u0438\u043d\u0442\u0435\u0440\u043d\u0435\u0442\u0430. \u041d\u0430\u0436\u0430\u0442\u0438\u0435 \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u0442 C:\\Users\\Public\\Desktop.");
         text.AppendLine(script);
-        text.AppendLine("DesktopSwitch.exe");
-        text.AppendLine("DesktopSwitch.exe -Status");
-        text.AppendLine("DesktopSwitch.exe -Once");
-        text.AppendLine("DesktopSwitch.exe -Stop");
+        text.AppendLine("Emergency folder.exe");
+        text.AppendLine("Emergency folder.exe -Status");
+        text.AppendLine("Emergency folder.exe -Once");
+        text.AppendLine("Emergency folder.exe -Stop");
         return text.ToString();
     }
 
     static bool ScriptsReady(string directory) {
-        return File.Exists(Path.Combine(directory, "DesktopSwitch.ps1"))
-            && File.Exists(Path.Combine(directory, "DesktopSwitch.Logic.ps1"))
-            && File.Exists(Path.Combine(directory, "DesktopSwitch.Widget.ps1"));
+        return File.Exists(Path.Combine(directory, "EmergencyFolder.ps1"))
+            && File.Exists(Path.Combine(directory, "EmergencyFolder.Logic.ps1"))
+            && File.Exists(Path.Combine(directory, "EmergencyFolder.Widget.ps1"));
     }
 
     static string PrepareScript(string exeDir) {
@@ -169,21 +171,21 @@ internal static class DesktopSwitchHost {
             if (CanWrite(exeDir)) {
                 try { RefreshScripts(exeDir); } catch (Exception ex) { Note("script refresh skipped: " + ex.Message); }
             }
-            return Path.Combine(exeDir, "DesktopSwitch.ps1");
+            return Path.Combine(exeDir, "EmergencyFolder.ps1");
         }
         string dest = CanWrite(exeDir)
             ? exeDir
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DesktopSwitch", "app");
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Emergency folder", "app");
         Directory.CreateDirectory(dest);
         RefreshScripts(dest);
         Note("extracted scripts to " + dest);
-        return Path.Combine(dest, "DesktopSwitch.ps1");
+        return Path.Combine(dest, "EmergencyFolder.ps1");
     }
 
     static void RefreshScripts(string directory) {
-        ExtractResource("DesktopSwitch.ps1", directory);
-        ExtractResource("DesktopSwitch.Logic.ps1", directory);
-        ExtractResource("DesktopSwitch.Widget.ps1", directory);
+        ExtractResource("EmergencyFolder.ps1", directory);
+        ExtractResource("EmergencyFolder.Logic.ps1", directory);
+        ExtractResource("EmergencyFolder.Widget.ps1", directory);
     }
 
     static void ExtractResource(string name, string directory) {
@@ -197,7 +199,7 @@ internal static class DesktopSwitchHost {
 
     static bool CanWrite(string directory) {
         try {
-            string probe = Path.Combine(directory, ".desktopswitch-write");
+            string probe = Path.Combine(directory, ".emergency-folder-write");
             File.WriteAllText(probe, "ok");
             File.Delete(probe);
             return true;
@@ -215,7 +217,7 @@ internal static class DesktopSwitchHost {
 
     static void Note(string text) {
         try {
-            string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DesktopSwitch");
+            string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Emergency folder");
             Directory.CreateDirectory(root);
             File.AppendAllText(Path.Combine(root, "host.log"), DateTime.Now.ToString("s") + " " + text + Environment.NewLine, new UTF8Encoding(false));
         } catch { }

@@ -9,12 +9,12 @@
 param(
     [switch]$AllUsers,
     [string]$InstallDir,
-    [string]$TaskName = 'DesktopSwitch'
+    [string]$TaskName = 'Emergency folder'
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
+. (Join-Path $PSScriptRoot 'EmergencyFolder.Logic.ps1')
 
 function Get-InstallerIdentityName {
     try {
@@ -39,7 +39,7 @@ if ($removeCommon) {
 }
 
 foreach ($folder in $folders) {
-    foreach ($name in @('DesktopSwitch.vbs', 'DesktopSwitch.lnk')) {
+    foreach ($name in @('DesktopSwitch.vbs', 'DesktopSwitch.lnk', 'Emergency folder.vbs', 'Emergency folder.lnk')) {
         $itemPath = Join-Path $folder $name
         if (Test-Path -LiteralPath $itemPath) {
             Remove-Item -LiteralPath $itemPath -Force
@@ -48,17 +48,19 @@ foreach ($folder in $folders) {
     }
 }
 
-foreach ($proc in @(Get-Process -Name 'DesktopSwitch' -ErrorAction SilentlyContinue)) {
-    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-    Write-Host ("Остановлен DesktopSwitch.exe, процесс {0}." -f $proc.Id)
+foreach ($procName in @('Emergency folder', 'DesktopSwitch')) {
+    foreach ($proc in @(Get-Process -Name $procName -ErrorAction SilentlyContinue)) {
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        Write-Host ("Остановлен процесс {0}, идентификатор {1}." -f $proc.ProcessName, $proc.Id)
+    }
 }
 
 foreach ($name in @('powershell.exe', 'pwsh.exe')) {
     $procs = @(Get-CimInstance Win32_Process -Filter "Name = '$name'" -ErrorAction SilentlyContinue)
     foreach ($proc in $procs) {
         $line = [string]$proc.CommandLine
-        if ($line -notmatch '(?i)(^|[\s\"\\])DesktopSwitch\.ps1') { continue }
-        if ($line -match '(?i)(Install|Uninstall)-DesktopSwitch\.ps1') { continue }
+        if ($line -notmatch '(?i)EmergencyFolder\.ps1' -and $line -notmatch '(?i)DesktopSwitch\.ps1') { continue }
+        if ($line -match '(?i)(Install|Uninstall)-(EmergencyFolder|DesktopSwitch)\.ps1') { continue }
         Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
         Write-Host ("Остановлен процесс {0}." -f $proc.ProcessId)
     }
@@ -72,16 +74,16 @@ try {
 }
 
 if (-not [string]::IsNullOrWhiteSpace($InstallDir)) {
-    if (-not (Test-DesktopSwitchInstallDir $InstallDir)) {
+    if (-not (Test-EmergencyFolderInstallDir $InstallDir)) {
         throw 'InstallDir должен быть локальной папкой программы, не корнем диска и не сетевым путём.'
     }
     $program = [System.IO.Path]::GetFullPath($InstallDir)
-    $marker = Join-Path $program 'DesktopSwitch.ps1'
+    $marker = Join-Path $program 'EmergencyFolder.ps1'
     if (Test-Path -LiteralPath $marker) {
         Remove-Item -LiteralPath $program -Recurse -Force
         Write-Host ("Удалена папка программы: {0}" -f $program)
     } else {
-        Write-Host ("Папка программы не удалена, в ней нет DesktopSwitch.ps1: {0}" -f $program)
+        Write-Host ("Папка программы не удалена, в ней нет EmergencyFolder.ps1: {0}" -f $program)
     }
 }
 

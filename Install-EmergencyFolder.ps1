@@ -13,24 +13,26 @@ param(
     [switch]$ScheduledTask,
     [switch]$NoLaunch,
     [string]$InstallDir,
-    [string]$TaskName = 'DesktopSwitch'
+    [string]$TaskName = 'Emergency folder'
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
+. (Join-Path $PSScriptRoot 'EmergencyFolder.Logic.ps1')
 
-function Stop-DesktopSwitchMonitor {
-    foreach ($proc in @(Get-Process -Name 'DesktopSwitch' -ErrorAction SilentlyContinue)) {
-        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-        Write-Host ("Остановлен DesktopSwitch.exe, процесс {0}." -f $proc.Id)
+function Stop-EmergencyFolderMonitor {
+    foreach ($procName in @('Emergency folder', 'DesktopSwitch')) {
+        foreach ($proc in @(Get-Process -Name $procName -ErrorAction SilentlyContinue)) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Write-Host ("Остановлен процесс {0}, идентификатор {1}." -f $proc.ProcessName, $proc.Id)
+        }
     }
     foreach ($name in @('powershell.exe', 'pwsh.exe')) {
         $procs = @(Get-CimInstance Win32_Process -Filter "Name = '$name'" -ErrorAction SilentlyContinue)
         foreach ($proc in $procs) {
             $line = [string]$proc.CommandLine
-            if ($line -notmatch '(?i)(^|[\s\"\\])DesktopSwitch\.ps1') { continue }
-            if ($line -match '(?i)(Install|Uninstall)-DesktopSwitch\.ps1') { continue }
+            if ($line -notmatch '(?i)EmergencyFolder\.ps1' -and $line -notmatch '(?i)DesktopSwitch\.ps1') { continue }
+            if ($line -match '(?i)(Install|Uninstall)-(EmergencyFolder|DesktopSwitch)\.ps1') { continue }
             Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
             Write-Host ("Остановлен прежний монитор, процесс {0}." -f $proc.ProcessId)
         }
@@ -48,9 +50,9 @@ function Get-InstallerIdentityName {
     }
 }
 
-function Copy-DesktopSwitchPackage {
+function Copy-EmergencyFolderPackage {
     param([string]$Source, [string]$Destination)
-    if (-not (Test-DesktopSwitchInstallDir $Destination)) {
+    if (-not (Test-EmergencyFolderInstallDir $Destination)) {
         throw 'InstallDir должен быть локальной папкой, не корнем диска и не сетевым путём.'
     }
     $sourceFull = [System.IO.Path]::GetFullPath($Source)
@@ -60,13 +62,13 @@ function Copy-DesktopSwitchPackage {
         New-Item -ItemType Directory -Path $destFull -Force | Out-Null
     }
     $names = @(
-        'DesktopSwitch.exe',
-        'DesktopSwitch.ps1',
-        'DesktopSwitch.Logic.ps1',
-        'DesktopSwitch.Widget.ps1',
-        'Install-DesktopSwitch.ps1',
-        'Uninstall-DesktopSwitch.ps1',
-        'Show-DesktopSwitchStatus.cmd',
+        'Emergency folder.exe',
+        'EmergencyFolder.ps1',
+        'EmergencyFolder.Logic.ps1',
+        'EmergencyFolder.Widget.ps1',
+        'Install-EmergencyFolder.ps1',
+        'Uninstall-EmergencyFolder.ps1',
+        'Show-EmergencyFolderStatus.cmd',
         'README.md'
     )
     foreach ($name in $names) {
@@ -74,22 +76,22 @@ function Copy-DesktopSwitchPackage {
         if (-not (Test-Path -LiteralPath $from)) { continue }
         Copy-Item -LiteralPath $from -Destination (Join-Path $destFull $name) -Force
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $destFull 'DesktopSwitch.ps1'))) {
-        throw 'В пакете нет DesktopSwitch.ps1.'
+    if (-not (Test-Path -LiteralPath (Join-Path $destFull 'EmergencyFolder.ps1'))) {
+        throw 'В пакете нет EmergencyFolder.ps1.'
     }
     return $destFull
 }
 
-Stop-DesktopSwitchMonitor
+Stop-EmergencyFolderMonitor
 Start-Sleep -Seconds 1
 
 $packageRoot = $PSScriptRoot
 if (-not [string]::IsNullOrWhiteSpace($InstallDir)) {
-    $packageRoot = Copy-DesktopSwitchPackage -Source $PSScriptRoot -Destination $InstallDir
+    $packageRoot = Copy-EmergencyFolderPackage -Source $PSScriptRoot -Destination $InstallDir
     Write-Host ("Пакет скопирован: {0}" -f $packageRoot)
 }
-$monitor = (Resolve-Path -LiteralPath (Join-Path $packageRoot 'DesktopSwitch.ps1')).Path
-$exePath = Join-Path $packageRoot 'DesktopSwitch.exe'
+$monitor = (Resolve-Path -LiteralPath (Join-Path $packageRoot 'EmergencyFolder.ps1')).Path
+$exePath = Join-Path $packageRoot 'Emergency folder.exe'
 $exeFull = ''
 if (Test-Path -LiteralPath $exePath) {
     $exeFull = (Resolve-Path -LiteralPath $exePath).Path
@@ -104,7 +106,7 @@ if ($systemAccount -and -not $AllUsers) {
 if ($scope -eq 'CurrentUser') {
     $startup = [Environment]::GetFolderPath('Startup')
     if ([string]::IsNullOrWhiteSpace($startup)) { throw 'Не удалось определить папку автозагрузки.' }
-    $vbsPath = Join-Path $startup 'DesktopSwitch.vbs'
+    $vbsPath = Join-Path $startup 'Emergency folder.vbs'
     if (-not [string]::IsNullOrWhiteSpace($exeFull)) {
         $escaped = $exeFull.Replace('"', '""')
         $vbs = @"
@@ -125,7 +127,7 @@ shell.Run "powershell.exe -NoProfile -STA -WindowStyle Hidden -ExecutionPolicy B
     Set-Content -LiteralPath $vbsPath -Value $vbs -Encoding $encoding
     Write-Host ("Автозапуск создан: {0}" -f $vbsPath)
 } else {
-    Write-Host 'Общая папка автозагрузки не используется. Для всех пользователей ставьте DesktopSwitch.msi: автозапуск записан в HKLM\Software\Microsoft\Windows\CurrentVersion\Run.'
+    Write-Host 'Общая папка автозагрузки не используется. Для всех пользователей ставьте Emergency folder.msi: автозапуск записан в HKLM\Software\Microsoft\Windows\CurrentVersion\Run.'
 }
 
 if ($ScheduledTask) {
@@ -162,5 +164,5 @@ if (Test-InstallerShouldLaunch -SystemAccount $systemAccount -NoLaunch ([bool]$N
 } else {
     Write-Host 'Монитор запустится при следующем входе пользователя.'
 }
-Write-Host ("Журнал: {0}" -f (Join-Path $env:LOCALAPPDATA 'DesktopSwitch\desktop-switch.log'))
-Write-Host 'Проверка: DesktopSwitch.exe -Status'
+Write-Host ("Журнал: {0}" -f (Join-Path $env:LOCALAPPDATA 'Emergency folder\emergency-folder.log'))
+Write-Host 'Проверка: "Emergency folder.exe" -Status'

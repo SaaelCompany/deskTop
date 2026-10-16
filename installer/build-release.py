@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build DesktopSwitch.exe and the per-machine MSI used by SCCM."""
+"""Build Emergency folder.exe and the per-machine MSI used by SCCM."""
 
 import shutil
 import struct
@@ -10,8 +10,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = Path(__file__).resolve().parent
-VERSION = "1.2.41"
-PRODUCT_CODE = "{C4A81E57-2D60-4F93-B8C1-6E9A3D5F0B28}"
+VERSION = "1.2.42"
+PRODUCT_CODE = "{A91C6E24-5B70-4F18-8D3A-7E2F0C4B8A15}"
 UPGRADE_CODE = "{4048E9C4-7965-48DC-A23D-A4554966E57F}"
 
 
@@ -130,47 +130,48 @@ def main():
     if stage.exists():
         shutil.rmtree(stage)
     stage.mkdir(parents=True)
-    write_icon(INSTALLER / "DesktopSwitch.ico")
-    shutil.copy(INSTALLER / "DesktopSwitch.ico", stage / "DesktopSwitch.ico")
+    write_icon(INSTALLER / "EmergencyFolder.ico")
+    shutil.copy(INSTALLER / "EmergencyFolder.ico", stage / "EmergencyFolder.ico")
 
     names = [
-        "DesktopSwitch.ps1",
-        "DesktopSwitch.Logic.ps1",
-        "DesktopSwitch.Widget.ps1",
-        "Install-DesktopSwitch.ps1",
-        "Uninstall-DesktopSwitch.ps1",
-        "Show-DesktopSwitchStatus.cmd",
+        "EmergencyFolder.ps1",
+        "EmergencyFolder.Logic.ps1",
+        "EmergencyFolder.Widget.ps1",
+        "Install-EmergencyFolder.ps1",
+        "Uninstall-EmergencyFolder.ps1",
+        "Show-EmergencyFolderStatus.cmd",
         "README.md",
     ]
     for name in names:
         shutil.copy(ROOT / name, stage / name)
 
-    exe = stage / "DesktopSwitch.exe"
+    exe = stage / "Emergency folder.exe"
     run([
         mcs, "-nologo", "-target:winexe", "-sdk:4.5", "-platform:anycpu", "-optimize+",
         "-codepage:utf8",
         "-r:" + str(drawing),
         "-r:" + str(winforms),
         "-r:" + str(sma),
-        "-win32icon:" + str(stage / "DesktopSwitch.ico"),
-        "-resource:" + str(stage / "DesktopSwitch.ps1") + ",DesktopSwitch.ps1",
-        "-resource:" + str(stage / "DesktopSwitch.Logic.ps1") + ",DesktopSwitch.Logic.ps1",
-        "-resource:" + str(stage / "DesktopSwitch.Widget.ps1") + ",DesktopSwitch.Widget.ps1",
+        "-win32icon:" + str(stage / "EmergencyFolder.ico"),
+        "-resource:" + str(stage / "EmergencyFolder.ps1") + ",EmergencyFolder.ps1",
+        "-resource:" + str(stage / "EmergencyFolder.Logic.ps1") + ",EmergencyFolder.Logic.ps1",
+        "-resource:" + str(stage / "EmergencyFolder.Widget.ps1") + ",EmergencyFolder.Widget.ps1",
         "-out:" + str(exe),
-        str(INSTALLER / "DesktopSwitch.cs"),
+        str(INSTALLER / "EmergencyFolder.cs"),
     ])
     if subsystem(exe) != 2:
-        raise SystemExit("DesktopSwitch.exe is not a Windows GUI binary")
+        raise SystemExit("Emergency folder.exe is not a Windows GUI binary")
     blob = exe.read_bytes()
     for banned in (b"config.example.json", b"config.json", b"SHSetKnownFolderPath", b"NotifyIcon", b"JiraBaseUrl"):
         if banned in blob:
-            raise SystemExit("DesktopSwitch.exe still contains %s" % banned.decode())
+            raise SystemExit("Emergency folder.exe still contains %s" % banned.decode())
 
-    wxs = stage / "DesktopSwitch.wxs"
-    shutil.copy(INSTALLER / "DesktopSwitch.wxs", wxs)
-    msi = stage / "DesktopSwitch.msi"
+    wxs = stage / "EmergencyFolder.wxs"
+    shutil.copy(INSTALLER / "EmergencyFolder.wxs", wxs)
+    msi = stage / "Emergency folder.msi"
     run(["wixl", "-a", "x64", str(wxs), "-o", str(msi)])
-    add_action(msi, "CA_KillExe", "taskkill.exe /F /IM DesktopSwitch.exe", 1390)
+    add_action(msi, "CA_KillLegacy", "taskkill.exe /F /IM DesktopSwitch.exe", 1390)
+    add_action(msi, "CA_KillExe", 'taskkill.exe /F /IM "Emergency folder.exe"', 1392)
     add_action(
         msi,
         "CA_RemoveVbs",
@@ -191,37 +192,41 @@ def main():
                 raise SystemExit("msi ProductVersion is not %s" % VERSION)
 
     note = (
-        "DesktopSwitch %s\r\n\r\n"
-        "Распакуйте архив на локальный диск и запустите DesktopSwitch.exe.\r\n"
+        "Emergency folder %s\r\n\r\n"
+        "Распакуйте архив на локальный диск и запустите Emergency folder.exe.\r\n"
         "Файл конфигурации не нужен. Значка у часов нет. Рабочий стол не переключается.\r\n\r\n"
         "Если интернет пропадает, в правом нижнем углу появляется красная кнопка\r\n"
         "с белым восклицательным знаком. Нажатие открывает C:\\Users\\Public\\Desktop.\r\n"
         "Когда интернет возвращается, кнопка исчезает.\r\n\r\n"
         "Кнопка появляется после двух проверок подряд без интернета\r\n"
         "и исчезает после двух проверок подряд с интернетом. Интервал — 5 секунд.\r\n\r\n"
-        "Остановить программу можно в диспетчере задач: процесс DesktopSwitch.\r\n"
+        "Остановить программу можно в диспетчере задач: процесс Emergency folder.\r\n"
         "Если антивирус удаляет exe при скачивании из браузера, берите этот архив.\r\n"
     ) % VERSION
-    zip_path = stage / "DesktopSwitch-portable.zip"
+    zip_path = stage / "Emergency folder-portable.zip"
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name in names:
-            archive.write(stage / name, "DesktopSwitch/" + name)
-        archive.write(exe, "DesktopSwitch/DesktopSwitch.exe")
-        archive.writestr("DesktopSwitch/ПРОЧТИТЕ.txt", "\ufeff" + note)
+            archive.write(stage / name, "Emergency folder/" + name)
+        archive.write(exe, "Emergency folder/Emergency folder.exe")
+        archive.writestr("Emergency folder/ПРОЧТИТЕ.txt", "\ufeff" + note)
 
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
-    shutil.copy(exe, dist / "DesktopSwitch.exe")
-    shutil.copy(msi, dist / "DesktopSwitch.msi")
-    shutil.copy(zip_path, dist / "DesktopSwitch-portable.zip")
+    shutil.copy(exe, dist / "Emergency folder.exe")
+    shutil.copy(msi, dist / "Emergency folder.msi")
+    shutil.copy(zip_path, dist / "Emergency folder-portable.zip")
     artifacts = Path("/opt/cursor/artifacts")
     if artifacts.exists():
-        shutil.copyfile(exe, artifacts / "DesktopSwitch.exe")
-        shutil.copyfile(msi, artifacts / "DesktopSwitch.msi")
-        shutil.copyfile(zip_path, artifacts / "DesktopSwitch-portable.zip")
-    print(dist / "DesktopSwitch.exe", (dist / "DesktopSwitch.exe").stat().st_size)
-    print(dist / "DesktopSwitch.msi", (dist / "DesktopSwitch.msi").stat().st_size)
-    print(dist / "DesktopSwitch-portable.zip", (dist / "DesktopSwitch-portable.zip").stat().st_size)
+        for stale in ("DesktopSwitch.exe", "DesktopSwitch.msi", "DesktopSwitch-portable.zip"):
+            old = artifacts / stale
+            if old.exists():
+                old.unlink()
+        shutil.copyfile(exe, artifacts / "Emergency folder.exe")
+        shutil.copyfile(msi, artifacts / "Emergency folder.msi")
+        shutil.copyfile(zip_path, artifacts / "Emergency folder-portable.zip")
+    print(dist / "Emergency folder.exe", (dist / "Emergency folder.exe").stat().st_size)
+    print(dist / "Emergency folder.msi", (dist / "Emergency folder.msi").stat().st_size)
+    print(dist / "Emergency folder-portable.zip", (dist / "Emergency folder-portable.zip").stat().st_size)
     print("ProductCode", PRODUCT_CODE)
     print("UpgradeCode", UPGRADE_CODE)
     print("Version", VERSION)

@@ -97,7 +97,7 @@ function Test-InstallerShouldLaunch {
     return $true
 }
 
-function Test-DesktopSwitchInstallDir {
+function Test-EmergencyFolderInstallDir {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
     $full = $Path.Trim()

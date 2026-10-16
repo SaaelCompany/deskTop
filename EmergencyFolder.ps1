@@ -5,8 +5,8 @@
     Нажатие открывает C:\Users\Public\Desktop. Когда интернет есть, кнопки нет.
 
     Права администратора не нужны:
-      DesktopSwitch.exe
-      DesktopSwitch.exe -Status
+      "Emergency folder.exe"
+      "Emergency folder.exe" -Status
 #>
 [CmdletBinding()]
 param(
@@ -17,10 +17,10 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-. (Join-Path $PSScriptRoot 'DesktopSwitch.Logic.ps1')
-. (Join-Path $PSScriptRoot 'DesktopSwitch.Widget.ps1')
+. (Join-Path $PSScriptRoot 'EmergencyFolder.Logic.ps1')
+. (Join-Path $PSScriptRoot 'EmergencyFolder.Widget.ps1')
 
-$script:Version = '1.2.41'
+$script:Version = '1.2.42'
 $script:IntervalSeconds = 5
 $script:ProbeTimeoutSeconds = 5
 $script:ProbeUrl = 'http://www.msftconnecttest.com/connecttest.txt'
@@ -39,7 +39,7 @@ $script:FirstTick = $true
 
 $logRoot = $env:LOCALAPPDATA
 if ([string]::IsNullOrWhiteSpace($logRoot)) { $logRoot = $env:TEMP }
-$script:LogFile = Join-Path $logRoot 'DesktopSwitch\desktop-switch.log'
+$script:LogFile = Join-Path $logRoot 'Emergency folder\emergency-folder.log'
 
 function Initialize-Log {
     $dir = Split-Path -Parent $script:LogFile
@@ -48,7 +48,7 @@ function Initialize-Log {
             New-Item -ItemType Directory -Force -Path $dir | Out-Null
         }
     } catch {
-        $fallback = Join-Path $env:TEMP 'DesktopSwitch.log'
+        $fallback = Join-Path $env:TEMP 'Emergency folder.log'
         $script:LogFile = $fallback
         $dir = Split-Path -Parent $fallback
         if ($dir -and -not (Test-Path -LiteralPath $dir)) {
@@ -101,7 +101,7 @@ function Test-ProbeUrl {
         $request.Method = 'GET'
         $request.Timeout = $TimeoutSec * 1000
         $request.ReadWriteTimeout = $TimeoutSec * 1000
-        $request.UserAgent = 'DesktopSwitch'
+        $request.UserAgent = 'Emergency folder'
         $request.AllowAutoRedirect = $false
         $proxy = [System.Net.WebRequest]::GetSystemWebProxy()
         $proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
@@ -148,14 +148,14 @@ function Show-StartupProblem {
     try { Write-Log $Text 'ERROR' } catch { Write-Host $Text }
     try {
         Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
-        [System.Windows.Forms.MessageBox]::Show($Text, 'Сервисная служба') | Out-Null
+        [System.Windows.Forms.MessageBox]::Show($Text, 'Emergency folder') | Out-Null
     } catch {
         Write-Host $Text
     }
 }
 
 function Enter-SingleInstance {
-    $script:Mutex = New-Object System.Threading.Mutex($false, 'Local\DesktopSwitchMonitor')
+    $script:Mutex = New-Object System.Threading.Mutex($false, 'Local\EmergencyFolderMonitor')
     $acquired = $false
     try {
         $acquired = $script:Mutex.WaitOne(0)
@@ -179,10 +179,20 @@ function Exit-SingleInstance {
     }
 }
 
+function Stop-LegacyMonitor {
+    foreach ($proc in @(Get-Process -Name 'DesktopSwitch' -ErrorAction SilentlyContinue)) {
+        try {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Write-Log ("Остановлена прежняя программа DesktopSwitch, процесс {0}." -f $proc.Id)
+        } catch {
+        }
+    }
+}
+
 function Show-StatusReport {
     $internet = 'Unknown'
     try { $internet = Get-InternetStatus } catch { $internet = 'Unknown' }
-    Write-Host ("DesktopSwitch {0}" -f $script:Version)
+    Write-Host ("Emergency folder {0}" -f $script:Version)
     Write-Host ("Интернет: {0}" -f (Format-StatusWord $internet))
     Write-Host ("Кнопка открывает: {0}" -f (Get-PublicDesktopPath))
     Write-Host ("Журнал: {0}" -f $script:LogFile)
@@ -256,7 +266,8 @@ if (-not (Enter-SingleInstance)) {
 
 try {
     Initialize-LauncherWindow
-    Write-Log ("DesktopSwitch {0} запущен. Кнопка появится, если интернет пропадёт. Папка: {1}" -f $script:Version, (Get-PublicDesktopPath))
+    Stop-LegacyMonitor
+    Write-Log ("Emergency folder {0} запущен. Кнопка появится, если интернет пропадёт. Папка: {1}" -f $script:Version, (Get-PublicDesktopPath))
     if ($Once) {
         Invoke-MonitorCycle
     } else {

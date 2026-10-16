@@ -1,5 +1,5 @@
 ﻿# Красный круг с белым восклицательным знаком. Окна в панели задач нет.
-# Показ и скрытие решает DesktopSwitch.ps1.
+# Показ и скрытие решает EmergencyFolder.ps1.
 
 Set-StrictMode -Version 2.0
 
@@ -28,7 +28,7 @@ public class OfflineButtonForm : Form {
         Size = new Size(markSize, markSize);
         BackColor = Color.FromArgb(220, 38, 38);
         Cursor = Cursors.Hand;
-        Text = "\u0421\u0435\u0440\u0432\u0438\u0441\u043d\u0430\u044f \u0441\u043b\u0443\u0436\u0431\u0430";
+        Text = "Emergency folder";
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
         using (GraphicsPath path = new GraphicsPath()) {
             path.AddEllipse(0, 0, markSize - 1, markSize - 1);
@@ -131,7 +131,7 @@ function Open-PublicDesktop {
             Write-Log $text 'ERROR'
         }
         try {
-            [System.Windows.Forms.MessageBox]::Show($text, 'Сервисная служба') | Out-Null
+            [System.Windows.Forms.MessageBox]::Show($text, 'Emergency folder') | Out-Null
         } catch {
             Write-Host $text
         }
