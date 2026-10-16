@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product Id="A91C6E24-5B70-4F18-8D3A-7E2F0C4B8A15"
+  <Product Id="D4E81B36-7A25-4C09-9F63-1B8A5E0C7D42"
            Name="Emergency folder"
            Language="1033"
-           Version="1.2.42"
+           Version="1.2.43"
            Manufacturer="SaaelCompany"
            UpgradeCode="4048E9C4-7965-48DC-A23D-A4554966E57F">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
@@ -26,7 +26,7 @@
             <File Id="FilUninstall" Source="Uninstall-EmergencyFolder.ps1" />
             <File Id="FilStatus" Source="Show-EmergencyFolderStatus.cmd" />
             <File Id="FilReadme" Source="README.md" />
-            <RegistryValue Root="HKLM" Key="Software\SaaelCompany\Emergency folder" Name="Version" Type="string" Value="1.2.42" />
+            <RegistryValue Root="HKLM" Key="Software\SaaelCompany\Emergency folder" Name="Version" Type="string" Value="1.2.43" />
             <RegistryValue Root="HKLM" Key="Software\SaaelCompany\Emergency folder" Name="InstallDir" Type="string" Value="[INSTALLDIR]" />
             <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="Emergency folder" Type="string" Value="&quot;[INSTALLDIR]Emergency folder.exe&quot;" />
           </Component>

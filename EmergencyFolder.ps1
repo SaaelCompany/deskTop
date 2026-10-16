@@ -1,8 +1,8 @@
 ﻿#Requires -Version 5.1
 <#
-    Следит за интернетом в сеансе пользователя.
-    Когда интернета нет, в правом нижнем углу появляется красная кнопка.
-    Нажатие открывает C:\Users\Public\Desktop. Когда интернет есть, кнопки нет.
+    Пингует контроллер домена 172.16.9.7.
+    Когда контроллер не отвечает, в правом нижнем углу появляется красная кнопка.
+    Нажатие открывает C:\Users\Public\Desktop. Когда контроллер снова отвечает, кнопки нет.
 
     Права администратора не нужны:
       "Emergency folder.exe"
@@ -20,13 +20,11 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'EmergencyFolder.Logic.ps1')
 . (Join-Path $PSScriptRoot 'EmergencyFolder.Widget.ps1')
 
-$script:Version = '1.2.42'
-$script:IntervalSeconds = 5
-$script:ProbeTimeoutSeconds = 5
-$script:ProbeUrl = 'http://www.msftconnecttest.com/connecttest.txt'
-$script:ExpectedProbeBody = 'Microsoft Connect Test'
-$script:DownChecks = 2
-$script:UpChecks = 2
+$script:Version = '1.2.43'
+$script:IntervalSeconds = 60
+$script:PingTimeoutMs = 2000
+$script:DownChecks = 1
+$script:UpChecks = 1
 $script:MaxLogBytes = 1048576
 $script:Mutex = $null
 $script:MutexOwned = $false
@@ -72,64 +70,26 @@ function Write-Log {
     Write-Host $line
 }
 
-function Test-WindowsInternet {
-    $nlm = $null
+function Test-DomainControllerPing {
+    param([string]$Address, [int]$TimeoutMs)
+    $ping = $null
     try {
-        $clsid = [Guid]'DCB00C01-570F-4A9B-8D69-199FDBA5723B'
-        $type = [Type]::GetTypeFromCLSID($clsid)
-        if ($null -eq $type) { return $null }
-        $nlm = [Activator]::CreateInstance($type)
-        $connectivity = [int]$nlm.GetConnectivity()
-        $ipv4Internet = 0x40
-        $ipv6Internet = 0x400
-        return (($connectivity -band $ipv4Internet) -ne 0) -or (($connectivity -band $ipv6Internet) -ne 0)
+        $ping = New-Object System.Net.NetworkInformation.Ping
+        $reply = $ping.Send($Address, $TimeoutMs)
+        if ($null -eq $reply) { return $false }
+        return $reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success
     } catch {
-        Write-Log ("Проверка статуса сети Windows не выполнилась: {0}" -f $_.Exception.Message) 'WARN'
-        return $null
-    } finally {
-        if ($null -ne $nlm) {
-            try { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($nlm) } catch { }
-        }
-    }
-}
-
-function Test-ProbeUrl {
-    param([string]$Url, [int]$TimeoutSec, [string]$ExpectedBody)
-    $response = $null
-    try {
-        $request = [System.Net.HttpWebRequest]::Create($Url)
-        $request.Method = 'GET'
-        $request.Timeout = $TimeoutSec * 1000
-        $request.ReadWriteTimeout = $TimeoutSec * 1000
-        $request.UserAgent = 'Emergency folder'
-        $request.AllowAutoRedirect = $false
-        $proxy = [System.Net.WebRequest]::GetSystemWebProxy()
-        $proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
-        $request.Proxy = $proxy
-        $response = $request.GetResponse()
-        $code = [int]$response.StatusCode
-        if ($code -lt 200 -or $code -ge 300) { return $false }
-        if ([string]::IsNullOrWhiteSpace($ExpectedBody)) { return $true }
-        $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
-        try { $body = $reader.ReadToEnd() } finally { $reader.Close() }
-        return $body.Trim().StartsWith($ExpectedBody.Trim())
-    } catch {
+        Write-Log ("Пинг {0} не выполнился: {1}" -f $Address, $_.Exception.Message) 'WARN'
         return $false
     } finally {
-        if ($null -ne $response) { $response.Close() }
+        if ($null -ne $ping) { $ping.Dispose() }
     }
 }
 
 function Get-InternetStatus {
-    $windows = Test-WindowsInternet
-    $probe = $null
-    if ($windows -ne $true) {
-        $probeTimeout = Get-InternetProbeTimeout -Configured $script:ProbeTimeoutSeconds -WindowsInternet $windows
-        $results = New-Object System.Collections.Generic.List[bool]
-        $results.Add((Test-ProbeUrl -Url $script:ProbeUrl -TimeoutSec $probeTimeout -ExpectedBody $script:ExpectedProbeBody))
-        $probe = Resolve-ProbeAggregate -Results $results.ToArray()
-    }
-    return Resolve-InternetStatus -WindowsInternet $windows -ProbeSucceeded $probe
+    $address = Get-DomainControllerAddress
+    $ok = Test-DomainControllerPing -Address $address -TimeoutMs $script:PingTimeoutMs
+    return Resolve-PingStatus -Succeeded $ok
 }
 
 function Format-StatusWord {
@@ -193,7 +153,7 @@ function Show-StatusReport {
     $internet = 'Unknown'
     try { $internet = Get-InternetStatus } catch { $internet = 'Unknown' }
     Write-Host ("Emergency folder {0}" -f $script:Version)
-    Write-Host ("Интернет: {0}" -f (Format-StatusWord $internet))
+    Write-Host ("Контроллер {0}: {1}" -f (Get-DomainControllerAddress), (Format-StatusWord $internet))
     Write-Host ("Кнопка открывает: {0}" -f (Get-PublicDesktopPath))
     Write-Host ("Журнал: {0}" -f $script:LogFile)
 }
@@ -211,9 +171,9 @@ function Update-OfflineButton {
     }
     if ($decision.Changed) {
         if ($decision.Visible) {
-            Write-Log 'Интернета нет. Показана красная кнопка.'
+            Write-Log ("Контроллер {0} не отвечает. Показана красная кнопка." -f (Get-DomainControllerAddress))
         } else {
-            Write-Log 'Интернет есть. Красная кнопка скрыта.'
+            Write-Log ("Контроллер {0} отвечает. Красная кнопка скрыта." -f (Get-DomainControllerAddress))
         }
     }
 }
@@ -223,14 +183,14 @@ function Invoke-MonitorCycle {
     try {
         $internet = Get-InternetStatus
     } catch {
-        Write-Log ("Проверка интернета не выполнилась: {0}" -f $_.Exception.Message) 'WARN'
+        Write-Log ("Пинг контроллера не выполнился: {0}" -f $_.Exception.Message) 'WARN'
     }
     $before = $script:ButtonShown
     Update-OfflineButton -Internet $internet
     if ($internet -ne $script:LastInternet -or $before -ne $script:ButtonShown) {
         $buttonWord = 'hidden'
         if ($script:ButtonShown) { $buttonWord = 'shown' }
-        Write-Log ("internet={0} button={1}" -f $internet, $buttonWord)
+        Write-Log ("dc={0} ping={1} button={2}" -f (Get-DomainControllerAddress), $internet, $buttonWord)
     }
     $script:LastInternet = [string]$internet
 }
@@ -267,7 +227,7 @@ if (-not (Enter-SingleInstance)) {
 try {
     Initialize-LauncherWindow
     Stop-LegacyMonitor
-    Write-Log ("Emergency folder {0} запущен. Кнопка появится, если интернет пропадёт. Папка: {1}" -f $script:Version, (Get-PublicDesktopPath))
+    Write-Log ("Emergency folder {0} запущен. Пинг {1} каждые {2} с. Папка: {3}" -f $script:Version, (Get-DomainControllerAddress), $script:IntervalSeconds, (Get-PublicDesktopPath))
     if ($Once) {
         Invoke-MonitorCycle
     } else {

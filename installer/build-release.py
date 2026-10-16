@@ -10,8 +10,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = Path(__file__).resolve().parent
-VERSION = "1.2.42"
-PRODUCT_CODE = "{A91C6E24-5B70-4F18-8D3A-7E2F0C4B8A15}"
+VERSION = "1.2.43"
+PRODUCT_CODE = "{D4E81B36-7A25-4C09-9F63-1B8A5E0C7D42}"
 UPGRADE_CODE = "{4048E9C4-7965-48DC-A23D-A4554966E57F}"
 
 
@@ -162,7 +162,7 @@ def main():
     if subsystem(exe) != 2:
         raise SystemExit("Emergency folder.exe is not a Windows GUI binary")
     blob = exe.read_bytes()
-    for banned in (b"config.example.json", b"config.json", b"SHSetKnownFolderPath", b"NotifyIcon", b"JiraBaseUrl"):
+    for banned in (b"config.example.json", b"config.json", b"SHSetKnownFolderPath", b"NotifyIcon", b"JiraBaseUrl", b"msftconnecttest"):
         if banned in blob:
             raise SystemExit("Emergency folder.exe still contains %s" % banned.decode())
 
@@ -198,8 +198,9 @@ def main():
         "Если интернет пропадает, в правом нижнем углу появляется красная кнопка\r\n"
         "с белым восклицательным знаком. Нажатие открывает C:\\Users\\Public\\Desktop.\r\n"
         "Когда интернет возвращается, кнопка исчезает.\r\n\r\n"
-        "Кнопка появляется после двух проверок подряд без интернета\r\n"
-        "и исчезает после двух проверок подряд с интернетом. Интервал — 5 секунд.\r\n\r\n"
+        "Программа пингует контроллер домена 172.16.9.7.\r\n"
+        "Если он не отвечает, появляется кнопка. Если отвечает, кнопка исчезает.\r\n"
+        "Повтор пинга — каждые 60 секунд.\r\n\r\n"
         "Остановить программу можно в диспетчере задач: процесс Emergency folder.\r\n"
         "Если антивирус удаляет exe при скачивании из браузера, берите этот архив.\r\n"
     ) % VERSION

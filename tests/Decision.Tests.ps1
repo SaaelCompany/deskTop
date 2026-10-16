@@ -40,25 +40,15 @@ function Step-Button {
 }
 
 Assert-Equal 'public desktop' (Get-PublicDesktopPath) 'C:\Users\Public\Desktop'
+Assert-Equal 'domain controller' (Get-DomainControllerAddress) '172.16.9.7'
+Assert-Equal 'ping up' (Resolve-PingStatus -Succeeded $true) 'Up'
+Assert-Equal 'ping down' (Resolve-PingStatus -Succeeded $false) 'Down'
+Assert-Equal 'ping unknown' (Resolve-PingStatus -Succeeded $null) 'Unknown'
 
-Assert-Equal 'windows up ignores probe' (Resolve-InternetStatus -WindowsInternet $true -ProbeSucceeded $false) 'Up'
-Assert-Equal 'probe up wins' (Resolve-InternetStatus -WindowsInternet $false -ProbeSucceeded $true) 'Up'
-Assert-Equal 'windows down' (Resolve-InternetStatus -WindowsInternet $false -ProbeSucceeded $false) 'Down'
-Assert-Equal 'probe down without windows' (Resolve-InternetStatus -WindowsInternet $null -ProbeSucceeded $false) 'Down'
-Assert-Equal 'both unknown' (Resolve-InternetStatus -WindowsInternet $null -ProbeSucceeded $null) 'Unknown'
-
-Assert-Equal 'empty probe' (Resolve-ProbeAggregate -Results @()) ''
-Assert-Equal 'any probe success' (Resolve-ProbeAggregate -Results @($false, $true)) 'True'
-Assert-Equal 'all probes fail' (Resolve-ProbeAggregate -Results @($false, $false)) 'False'
-
-Assert-Equal 'offline probe shortened' (Get-InternetProbeTimeout -Configured 5 -WindowsInternet $false) '2'
-Assert-Equal 'offline probe already short' (Get-InternetProbeTimeout -Configured 2 -WindowsInternet $false) '2'
-Assert-Equal 'offline probe floor' (Get-InternetProbeTimeout -Configured 1 -WindowsInternet $false) '1'
-Assert-Equal 'online probe kept' (Get-InternetProbeTimeout -Configured 5 -WindowsInternet $true) '5'
-Assert-Equal 'unknown windows keeps probe' (Get-InternetProbeTimeout -Configured 5 -WindowsInternet $null) '5'
-Assert-Equal 'probe clamp then shorten' (Get-InternetProbeTimeout -Configured 100 -WindowsInternet $false) '2'
-Assert-Equal 'probe clamp online' (Get-InternetProbeTimeout -Configured 100 -WindowsInternet $true) '30'
-Assert-Equal 'probe minimum' (Get-InternetProbeTimeout -Configured 0 -WindowsInternet $true) '1'
+$once = Update-ButtonVisibility -Internet 'Down' -Visible $false -DownStreak 0 -UpStreak 0 -DownChecks 1 -UpChecks 1
+Assert-Equal 'one missed ping shows button' $once.Visible 'True'
+$back = Update-ButtonVisibility -Internet 'Up' -Visible $true -DownStreak 0 -UpStreak 0 -DownChecks 1 -UpChecks 1
+Assert-Equal 'one reply hides button' $back.Visible 'False'
 
 $state = @{ Visible = $false; Down = 0; Up = 0 }
 $state = Step-Button $state 'Down'
@@ -127,8 +117,11 @@ $logicText = Get-Content -LiteralPath (Join-Path $root 'EmergencyFolder.Logic.ps
 Assert-True 'logic has no json config' ($logicText -notmatch 'ConvertFrom-Json')
 Assert-True 'widget paints exclamation' ((Get-Content -LiteralPath (Join-Path $root 'EmergencyFolder.Widget.ps1') -Raw -Encoding UTF8) -match 'DrawLine')
 $mainText = Get-Content -LiteralPath (Join-Path $root 'EmergencyFolder.ps1') -Raw -Encoding UTF8
-Assert-True 'version bumped' ($mainText -match '1\.2\.42')
+Assert-True 'version bumped' ($mainText -match '1\.2\.43')
 Assert-True 'program name' ($mainText -match 'Emergency folder')
+Assert-True 'pings the domain controller' ($mainText -match '172\.16\.9\.7')
+Assert-True 'checks every minute' ($mainText -match 'IntervalSeconds = 60')
+Assert-True 'no external probe' ($mainText -notmatch 'msftconnecttest')
 
 if ($script:Failed -gt 0) {
     Write-Host ("{0} failed" -f $script:Failed)

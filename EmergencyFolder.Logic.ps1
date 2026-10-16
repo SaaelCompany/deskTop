@@ -3,35 +3,14 @@
 
 Set-StrictMode -Version 2.0
 
-function Get-ClampedTimeout {
-    param([int]$Seconds)
-    if ($Seconds -lt 1) { return 1 }
-    if ($Seconds -gt 30) { return 30 }
-    return $Seconds
+function Get-DomainControllerAddress {
+    return '172.16.9.7'
 }
 
-function Get-InternetProbeTimeout {
-    param([int]$Configured, $WindowsInternet)
-    $timeout = Get-ClampedTimeout $Configured
-    if ($WindowsInternet -eq $false -and $timeout -gt 2) { return 2 }
-    return $timeout
-}
-
-function Resolve-ProbeAggregate {
-    param([bool[]]$Results)
-    if ($null -eq $Results -or $Results.Count -eq 0) { return $null }
-    foreach ($result in $Results) {
-        if ($result) { return $true }
-    }
-    return $false
-}
-
-function Resolve-InternetStatus {
-    param($WindowsInternet, $ProbeSucceeded)
-    if ($WindowsInternet -eq $true) { return 'Up' }
-    if ($ProbeSucceeded -eq $true) { return 'Up' }
-    if ($WindowsInternet -eq $false) { return 'Down' }
-    if ($ProbeSucceeded -eq $false) { return 'Down' }
+function Resolve-PingStatus {
+    param($Succeeded)
+    if ($Succeeded -eq $true) { return 'Up' }
+    if ($Succeeded -eq $false) { return 'Down' }
     return 'Unknown'
 }
 
