@@ -40,7 +40,7 @@ function Step-Button {
 }
 
 Assert-Equal 'public desktop' (Get-PublicDesktopPath) 'C:\Users\Public\Desktop'
-Assert-Equal 'domain controller' (Get-DomainControllerAddress) '172.16.9.7'
+Assert-Equal 'domain controller' (Get-DomainControllerAddress) 'ip'
 Assert-Equal 'ping up' (Resolve-PingStatus -Succeeded $true) 'Up'
 Assert-Equal 'ping down' (Resolve-PingStatus -Succeeded $false) 'Down'
 Assert-Equal 'ping unknown' (Resolve-PingStatus -Succeeded $null) 'Unknown'
