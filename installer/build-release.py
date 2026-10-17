@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Build DesktopSwitch.exe and the per-machine MSI used by SCCM."""
+"""Build Emergency folder.exe and the per-machine MSI used by SCCM."""
 
 import shutil
 import struct
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = Path(__file__).resolve().parent
-VERSION = "1.2.30"
-PRODUCT_CODE = "{8C1E5A47-3D92-4B60-A7F4-2E9B6C0D1F53}"
+VERSION = "1.2.44"
+PRODUCT_CODE = "{E5F92C47-8B36-4D1A-A074-2C9B6F1D8E53}"
 UPGRADE_CODE = "{4048E9C4-7965-48DC-A23D-A4554966E57F}"
 
 
@@ -23,7 +24,7 @@ def render_icon(size):
     pixels = [[(0, 0, 0, 0) for _ in range(size)] for _ in range(size)]
     cx = (size - 1) / 2.0
     radius = size / 2.0 - 0.75
-    accent = (47, 107, 255, 255)
+    accent = (220, 38, 38, 255)
     for y in range(size):
         for x in range(size):
             if (x - cx) ** 2 + (y - cx) ** 2 <= radius ** 2:
@@ -41,15 +42,12 @@ def render_icon(size):
                     pixels[yy][xx] = color
 
     white = (255, 255, 255, 255)
-    for y in range(9, 20):
-        for x in range(9, 23):
-            left = x < 12 and (y < 11 or y > 17)
-            right = x > 19 and (y < 11 or y > 17)
-            if left or right:
-                continue
-            mark(x, y, white)
-    for x, y in ((13, 20), (14, 21), (15, 22), (16, 21), (17, 20)):
-        mark(x, y, white)
+    for y in range(7, 20):
+        mark(15, y, white)
+        mark(16, y, white)
+    for y in range(23, 26):
+        mark(15, y, white)
+        mark(16, y, white)
     return pixels
 
 
@@ -84,23 +82,6 @@ def write_icon(path):
     for image in images:
         blob += image
     path.write_bytes(blob)
-
-
-def sccm_config(example: Path, destination: Path):
-    override = INSTALLER / "config.sccm.json"
-    if override.exists():
-        data = override.read_bytes()
-    else:
-        text = example.read_text(encoding="utf-8-sig")
-        needle = '"Enabled": false'
-        if needle not in text:
-            raise SystemExit("config.example.json has no Enabled false switch")
-        text = text.replace(needle, '"Enabled": true', 1)
-        note = "// Файл пакета SCCM. Enabled включён. Перед раздачей впишите JiraBaseUrl. Токен оставьте пустым для входа Windows.\n"
-        if not text.startswith(note):
-            text = note + text
-        data = b"\xef\xbb\xbf" + text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
-    destination.write_bytes(data)
 
 
 def sql_quote(value):
@@ -149,50 +130,48 @@ def main():
     if stage.exists():
         shutil.rmtree(stage)
     stage.mkdir(parents=True)
-    (stage / "examples").mkdir()
-    write_icon(INSTALLER / "DesktopSwitch.ico")
-    shutil.copy(INSTALLER / "DesktopSwitch.ico", stage / "DesktopSwitch.ico")
+    write_icon(INSTALLER / "EmergencyFolder.ico")
+    shutil.copy(INSTALLER / "EmergencyFolder.ico", stage / "EmergencyFolder.ico")
 
     names = [
-        "DesktopSwitch.ps1",
-        "DesktopSwitch.Logic.ps1",
-        "DesktopSwitch.Widget.ps1",
-        "Install-DesktopSwitch.ps1",
-        "Uninstall-DesktopSwitch.ps1",
-        "Show-DesktopSwitchStatus.cmd",
-        "config.example.json",
+        "EmergencyFolder.ps1",
+        "EmergencyFolder.Logic.ps1",
+        "EmergencyFolder.Widget.ps1",
+        "Install-EmergencyFolder.ps1",
+        "Uninstall-EmergencyFolder.ps1",
+        "Show-EmergencyFolderStatus.cmd",
         "README.md",
     ]
     for name in names:
         shutil.copy(ROOT / name, stage / name)
-    shutil.copy(ROOT / "examples" / "news.json", stage / "examples" / "news.json")
-    sccm_config(ROOT / "config.example.json", stage / "config.json")
-    config_text = (stage / "config.json").read_text(encoding="utf-8-sig")
-    if '"Enabled": true' not in config_text:
-        raise SystemExit("SCCM config is not enabled")
 
-    exe = stage / "DesktopSwitch.exe"
+    exe = stage / "Emergency folder.exe"
     run([
         mcs, "-nologo", "-target:winexe", "-sdk:4.5", "-platform:anycpu", "-optimize+",
         "-codepage:utf8",
         "-r:" + str(drawing),
         "-r:" + str(winforms),
         "-r:" + str(sma),
-        "-win32icon:" + str(stage / "DesktopSwitch.ico"),
-        "-resource:" + str(stage / "DesktopSwitch.ps1") + ",DesktopSwitch.ps1",
-        "-resource:" + str(stage / "DesktopSwitch.Logic.ps1") + ",DesktopSwitch.Logic.ps1",
-        "-resource:" + str(stage / "DesktopSwitch.Widget.ps1") + ",DesktopSwitch.Widget.ps1",
+        "-win32icon:" + str(stage / "EmergencyFolder.ico"),
+        "-resource:" + str(stage / "EmergencyFolder.ps1") + ",EmergencyFolder.ps1",
+        "-resource:" + str(stage / "EmergencyFolder.Logic.ps1") + ",EmergencyFolder.Logic.ps1",
+        "-resource:" + str(stage / "EmergencyFolder.Widget.ps1") + ",EmergencyFolder.Widget.ps1",
         "-out:" + str(exe),
-        str(INSTALLER / "DesktopSwitch.cs"),
+        str(INSTALLER / "EmergencyFolder.cs"),
     ])
     if subsystem(exe) != 2:
-        raise SystemExit("DesktopSwitch.exe is not a Windows GUI binary")
+        raise SystemExit("Emergency folder.exe is not a Windows GUI binary")
+    blob = exe.read_bytes()
+    for banned in (b"config.example.json", b"config.json", b"SHSetKnownFolderPath", b"NotifyIcon", b"JiraBaseUrl", b"msftconnecttest"):
+        if banned in blob:
+            raise SystemExit("Emergency folder.exe still contains %s" % banned.decode())
 
-    wxs = stage / "DesktopSwitch.wxs"
-    shutil.copy(INSTALLER / "DesktopSwitch.wxs", wxs)
-    msi = stage / "DesktopSwitch.msi"
+    wxs = stage / "EmergencyFolder.wxs"
+    shutil.copy(INSTALLER / "EmergencyFolder.wxs", wxs)
+    msi = stage / "Emergency folder.msi"
     run(["wixl", "-a", "x64", str(wxs), "-o", str(msi)])
-    add_action(msi, "CA_KillExe", "taskkill.exe /F /IM DesktopSwitch.exe", 1390)
+    add_action(msi, "CA_KillLegacy", "taskkill.exe /F /IM DesktopSwitch.exe", 1390)
+    add_action(msi, "CA_KillExe", 'taskkill.exe /F /IM "Emergency folder.exe"', 1392)
     add_action(
         msi,
         "CA_RemoveVbs",
@@ -200,16 +179,55 @@ def main():
         1391,
     )
 
+    file_table = subprocess.check_output(["msiinfo", "export", str(msi), "File"], text=True, errors="replace")
+    for banned in ("config.json", "config.example.json", "news.json"):
+        if banned in file_table:
+            raise SystemExit("msi still packages %s" % banned)
+    summary = subprocess.check_output(["msiinfo", "suminfo", str(msi)], text=True, errors="replace")
+    if VERSION not in summary and VERSION not in file_table:
+        # ProductVersion lives in the Property table.
+        props = subprocess.check_output(["msiinfo", "export", str(msi), "Property"], text=True, errors="replace")
+        if "ProductVersion\t%s" % VERSION not in props and "ProductVersion\t%s" % VERSION not in props.replace("\t", " "):
+            if VERSION not in props:
+                raise SystemExit("msi ProductVersion is not %s" % VERSION)
+
+    note = (
+        "Emergency folder %s\r\n\r\n"
+        "Распакуйте архив на локальный диск и запустите Emergency folder.exe.\r\n"
+        "Файл конфигурации не нужен. Значка у часов нет. Рабочий стол не переключается.\r\n\r\n"
+        "Если интернет пропадает, в правом нижнем углу появляется красная кнопка\r\n"
+        "с белым восклицательным знаком. Нажатие открывает C:\\Users\\Public\\Desktop.\r\n"
+        "Когда интернет возвращается, кнопка исчезает.\r\n\r\n"
+        "Программа пингует контроллер домена 172.16.9.7.\r\n"
+        "Если он не отвечает, появляется кнопка. Если отвечает, кнопка исчезает.\r\n"
+        "Повтор пинга — каждые 60 секунд.\r\n\r\n"
+        "Остановить программу можно в диспетчере задач: процесс Emergency folder.\r\n"
+        "Если антивирус удаляет exe при скачивании из браузера, берите этот архив.\r\n"
+    ) % VERSION
+    zip_path = stage / "Emergency folder-portable.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name in names:
+            archive.write(stage / name, "Emergency folder/" + name)
+        archive.write(exe, "Emergency folder/Emergency folder.exe")
+        archive.writestr("Emergency folder/ПРОЧТИТЕ.txt", "\ufeff" + note)
+
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
-    shutil.copy(exe, dist / "DesktopSwitch.exe")
-    shutil.copy(msi, dist / "DesktopSwitch.msi")
+    shutil.copy(exe, dist / "Emergency folder.exe")
+    shutil.copy(msi, dist / "Emergency folder.msi")
+    shutil.copy(zip_path, dist / "Emergency folder-portable.zip")
     artifacts = Path("/opt/cursor/artifacts")
     if artifacts.exists():
-        shutil.copyfile(exe, artifacts / "DesktopSwitch.exe")
-        shutil.copyfile(msi, artifacts / "DesktopSwitch.msi")
-    print(dist / "DesktopSwitch.exe", (dist / "DesktopSwitch.exe").stat().st_size)
-    print(dist / "DesktopSwitch.msi", (dist / "DesktopSwitch.msi").stat().st_size)
+        for stale in ("DesktopSwitch.exe", "DesktopSwitch.msi", "DesktopSwitch-portable.zip"):
+            old = artifacts / stale
+            if old.exists():
+                old.unlink()
+        shutil.copyfile(exe, artifacts / "Emergency folder.exe")
+        shutil.copyfile(msi, artifacts / "Emergency folder.msi")
+        shutil.copyfile(zip_path, artifacts / "Emergency folder-portable.zip")
+    print(dist / "Emergency folder.exe", (dist / "Emergency folder.exe").stat().st_size)
+    print(dist / "Emergency folder.msi", (dist / "Emergency folder.msi").stat().st_size)
+    print(dist / "Emergency folder-portable.zip", (dist / "Emergency folder-portable.zip").stat().st_size)
     print("ProductCode", PRODUCT_CODE)
     print("UpgradeCode", UPGRADE_CODE)
     print("Version", VERSION)
