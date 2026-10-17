@@ -4,7 +4,7 @@
 Set-StrictMode -Version 2.0
 
 function Get-DomainControllerAddress {
-    return '172.16.9.7'
+    return 'ip'
 }
 
 function Resolve-PingStatus {
